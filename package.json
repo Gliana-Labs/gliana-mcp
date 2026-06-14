@@ -45,6 +45,6 @@
   "homepage": "https://ai.glianalabs.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Gliana-Labs/gliana-mcp"
+    "url": "git+https://github.com/Gliana-Labs/gliana-mcp.git"
   }
 }
