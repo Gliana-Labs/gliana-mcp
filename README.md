@@ -29,7 +29,7 @@ Add to your MCP client config.
   "mcpServers": {
     "gliana-ai": {
       "command": "npx",
-      "args": ["-y", "gliana-mcp"],
+      "args": ["-y", "@glianalabs/mcp"],
       "env": {
         "GLIANA_WALLET_KEY": "0xYOUR_PRIVATE_KEY"
       }
