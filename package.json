@@ -1,0 +1,50 @@
+{
+  "name": "@gliana-ai/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for GlianaAI — pay-per-call generative AI across 59 models (image, video, music, speech). No signup or API key; each generate is paid per call from your own wallet over MPP / x402.",
+  "type": "module",
+  "bin": {
+    "gliana-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "mppx": "^0.6.31",
+    "viem": "^2.21.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "image-generation",
+    "video-generation",
+    "text-to-speech",
+    "music-generation",
+    "x402",
+    "mpp",
+    "pay-per-call",
+    "gliana"
+  ],
+  "author": "Gliana Labs",
+  "license": "MIT",
+  "homepage": "https://ai.glianalabs.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gliana-Labs/gliana-mcp"
+  }
+}
