@@ -1,0 +1,45 @@
+# Smithery configuration — https://smithery.ai/docs
+# Local stdio server: Smithery runs it on the user's machine via npx, so keys
+# stay local (non-custodial). Discovery tools need no config; generate needs a
+# wallet key for the chosen rail.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      glianaWalletKey:
+        type: string
+        title: EVM private key (Base / Tempo)
+        description: A 0x private key for a wallet holding USDC on Base (or Tempo). Needed only for `generate`. Use a dedicated low-balance wallet.
+      glianaSolanaKey:
+        type: string
+        title: Solana secret key
+        description: Base58 or JSON-array Solana secret key holding USDC. Needed only to pay with the solana rail.
+      glianaRail:
+        type: string
+        title: Payment rail
+        enum:
+          - base
+          - tempo
+          - solana
+        default: base
+        description: Which rail `generate` pays with. Fund the wallet on the matching chain.
+      glianaApiUrl:
+        type: string
+        title: API base URL
+        default: https://api.glianalabs.com
+        description: Override the gateway base URL (optional).
+    required: []
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', 'gliana-ai-mcp'],
+      env: {
+        ...(config.glianaWalletKey ? { GLIANA_WALLET_KEY: config.glianaWalletKey } : {}),
+        ...(config.glianaSolanaKey ? { GLIANA_SOLANA_KEY: config.glianaSolanaKey } : {}),
+        ...(config.glianaRail ? { GLIANA_RAIL: config.glianaRail } : {}),
+        ...(config.glianaApiUrl ? { GLIANA_API_URL: config.glianaApiUrl } : {})
+      }
+    })
+  exampleConfig:
+    glianaRail: base
