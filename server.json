@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.gliana-labs/gliana-ai-mcp",
   "title": "GlianaAI",
-  "description": "Pay-per-call generative AI — 59 models (image, video, music, speech). No signup or API key; each generate is paid per call from your own wallet over MPP / x402.",
+  "description": "Pay-per-call AI: 59 generative models (image, video, music, speech). No signup, no API key.",
   "repository": {
     "url": "https://github.com/Gliana-Labs/gliana-mcp",
     "source": "github"
