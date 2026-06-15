@@ -80,7 +80,19 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 const ok = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
+const okv = (s: string, structured: Record<string, unknown>) => ({
+  content: [{ type: 'text' as const, text: s }],
+  structuredContent: structured,
+});
 const fail = (s: string) => ({ content: [{ type: 'text' as const, text: s }], isError: true });
+
+const modelShape = {
+  id: z.string(),
+  provider: z.string(),
+  category: z.string(),
+  unit: z.string(),
+  priceLabel: z.string(),
+};
 
 /** Find a renderable media URL in an inference result (gateway or raw provider shape). */
 function mediaUrl(output: unknown): string | null {
@@ -99,12 +111,34 @@ type CatalogModel = { id: string; provider: string; category: string; unit: stri
 type Price = { model: string; costMicroUsd: number; unit: string; units: number };
 type InferResult = { model: string; costMicroUsd: number; output: unknown };
 
-const server = new McpServer({ name: 'gliana-ai', version: '0.2.0' });
+const server = new McpServer(
+  {
+    name: 'gliana-ai',
+    version: '0.3.0',
+    title: 'GlianaAI',
+    websiteUrl: 'https://ai.glianalabs.com',
+    icons: [
+      { src: 'https://ai.glianalabs.com/icon-512.png', mimeType: 'image/png', sizes: ['512x512'] },
+      { src: 'https://ai.glianalabs.com/logo.svg', mimeType: 'image/svg+xml', sizes: ['any'] },
+    ],
+  },
+  {
+    instructions:
+      'GlianaAI — pay-per-call generative AI across 59 models (image, video, music, speech). No signup or ' +
+      'API key. list_models to browse, get_price to quote, get_schema for inputs, generate to run (paid from ' +
+      'your own wallet over base/tempo/solana). Set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY to enable generate.',
+  },
+);
 
-server.tool(
+server.registerTool(
   'list_models',
-  'List every GlianaAI model (id, category, provider, per-call price). Free — no payment. Use this to pick a model before get_price/generate.',
-  {},
+  {
+    description:
+      'List every GlianaAI model (id, category, provider, per-call price). Free — no payment. Use this to pick a model before get_price/generate.',
+    inputSchema: {},
+    outputSchema: { count: z.number(), models: z.array(z.object(modelShape)) },
+    annotations: { title: 'List models', readOnlyHint: true, openWorldHint: true },
+  },
   async () => {
     const { models } = await getJson<{ models: CatalogModel[] }>('/v1/models');
     const byCat: Record<string, CatalogModel[]> = {};
@@ -112,45 +146,84 @@ server.tool(
     const out = Object.entries(byCat)
       .map(([cat, ms]) => `## ${cat}\n` + ms.map((m) => `- ${m.id} (${m.provider}) — ${m.priceLabel}`).join('\n'))
       .join('\n\n');
-    return ok(`${models.length} models on GlianaAI:\n\n${out}`);
+    return okv(`${models.length} models on GlianaAI:\n\n${out}`, { count: models.length, models });
   },
 );
 
-server.tool(
+server.registerTool(
   'get_price',
-  'Quote the exact cost of one call for a model (optionally with input that affects price, e.g. video duration or TTS character count). Free.',
   {
-    model: z.string().describe('Model id from list_models, e.g. "nano-banana-2" or "veo-3.1-fast".'),
-    input: z.record(z.any()).optional().describe('Optional model input that affects price (e.g. { duration: 8 } or { text: "..." }).'),
+    description:
+      'Quote the exact cost of one call for a model (optionally with input that affects price, e.g. video duration or TTS character count). Free.',
+    inputSchema: {
+      model: z.string().describe('Model id from list_models, e.g. "nano-banana-2" or "veo-3.1-fast".'),
+      input: z.record(z.any()).optional().describe('Optional model input that affects price (e.g. { duration: 8 } or { text: "..." }).'),
+    },
+    outputSchema: {
+      model: z.string(),
+      costMicroUsd: z.number(),
+      costUsd: z.string(),
+      unit: z.string(),
+      units: z.number(),
+    },
+    annotations: { title: 'Get price', readOnlyHint: true, openWorldHint: true },
   },
   async ({ model, input }) => {
     const qs = new URLSearchParams({ model });
     if (input) for (const [k, v] of Object.entries(input)) qs.set(k, String(v));
     const p = await getJson<Price>(`/v1/price?${qs.toString()}`);
-    return ok(`${p.model}: ${usd(p.costMicroUsd)} (${p.units} ${p.unit}${p.units === 1 ? '' : 's'}).`);
+    return okv(`${p.model}: ${usd(p.costMicroUsd)} (${p.units} ${p.unit}${p.units === 1 ? '' : 's'}).`, {
+      model: p.model,
+      costMicroUsd: p.costMicroUsd,
+      costUsd: usd(p.costMicroUsd),
+      unit: p.unit,
+      units: p.units,
+    });
   },
 );
 
-server.tool(
+server.registerTool(
   'get_schema',
-  'Get a model’s input fields (names, types, which are required, defaults). Use before generate to know what to send. Free.',
-  { model: z.string().describe('Model id from list_models.') },
+  {
+    description: 'Get a model’s input fields (names, types, which are required, defaults). Use before generate to know what to send. Free.',
+    inputSchema: { model: z.string().describe('Model id from list_models.') },
+    outputSchema: {
+      model: z.string(),
+      category: z.string(),
+      required: z.array(z.string()),
+      props: z.record(z.any()),
+    },
+    annotations: { title: 'Get input schema', readOnlyHint: true, openWorldHint: true },
+  },
   async ({ model }) => {
     const s = await getJson<{ model: string; category: string; required: string[]; props: Record<string, unknown> }>(
       `/v1/schema?model=${encodeURIComponent(model)}`,
     );
-    return ok(
+    return okv(
       `${s.model} (${s.category})\nrequired: ${s.required.join(', ') || '—'}\n\nfields:\n${JSON.stringify(s.props, null, 2)}`,
+      { model: s.model, category: s.category, required: s.required, props: s.props },
     );
   },
 );
 
-server.tool(
+server.registerTool(
   'generate',
-  'Run a model and return the result (media URL). PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost.',
   {
-    model: z.string().describe('Model id from list_models.'),
-    input: z.record(z.any()).describe('Model input, e.g. { prompt: "a red fox" } or { text: "hello" }. See get_schema.'),
+    description:
+      'Run a model and return the result (media URL). PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost.',
+    inputSchema: {
+      model: z.string().describe('Model id from list_models.'),
+      input: z.record(z.any()).describe('Model input, e.g. { prompt: "a red fox" } or { text: "hello" }. See get_schema.'),
+    },
+    outputSchema: {
+      model: z.string(),
+      costMicroUsd: z.number(),
+      costUsd: z.string(),
+      rail: z.string(),
+      url: z.string().optional().describe('Media URL of the result, when the model returns media.'),
+      output: z.any().describe('Raw model output.'),
+    },
+    annotations: { title: 'Generate (paid)', readOnlyHint: false, openWorldHint: true },
   },
   async ({ model, input }) => {
     const picked = resolveRail();
@@ -181,8 +254,16 @@ server.tool(
     const result = (await res.json()) as InferResult;
     const url = mediaUrl(result.output);
     const cost = usd(result.costMicroUsd);
-    if (url) return ok(`${result.model} → ${url}\ncharged ${cost} via ${rail}`);
-    return ok(`${result.model} (charged ${cost} via ${rail}):\n${JSON.stringify(result.output, null, 2)}`);
+    const structured = {
+      model: result.model,
+      costMicroUsd: result.costMicroUsd,
+      costUsd: cost,
+      rail,
+      ...(url ? { url } : {}),
+      output: result.output,
+    };
+    if (url) return okv(`${result.model} → ${url}\ncharged ${cost} via ${rail}`, structured);
+    return okv(`${result.model} (charged ${cost} via ${rail}):\n${JSON.stringify(result.output, null, 2)}`, structured);
   },
 );
 
