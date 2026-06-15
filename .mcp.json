@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "gliana-ai": {
+      "command": "npx",
+      "args": ["-y", "gliana-ai-mcp"],
+      "env": {
+        "GLIANA_WALLET_KEY": "",
+        "GLIANA_SOLANA_KEY": "",
+        "GLIANA_RAIL": "base"
+      }
+    }
+  }
+}
