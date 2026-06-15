@@ -6,7 +6,7 @@
       "env": {
         "GLIANA_WALLET_KEY": "",
         "GLIANA_SOLANA_KEY": "",
-        "GLIANA_RAIL": "base"
+        "GLIANA_RAIL": ""
       }
     }
   }
