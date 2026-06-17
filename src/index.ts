@@ -210,7 +210,7 @@ server.registerTool(
   'generate',
   {
     description:
-      'Run a model and return the result (media URL). PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost.',
+      'Run a model and return the result (media URL). PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost. File inputs (image/video/audio, e.g. image-to-video or video-to-video `video_uri`) take a public URL — upload a local file with POST /v1/media (≤40MB) to get one.',
     inputSchema: {
       model: z.string().describe('Model id from list_models.'),
       input: z.record(z.any()).describe('Model input, e.g. { prompt: "a red fox" } or { text: "hello" }. See get_schema.'),
