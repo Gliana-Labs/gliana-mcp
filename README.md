@@ -1,8 +1,8 @@
 # GlianaAI MCP server
 
 Pay-per-call generative AI for any MCP client (Claude Desktop, Cursor, …).
-**59 models** — image, video, music, speech — with **no signup and no API key**.
-Each `generate` is paid per call from **your own wallet** over MPP / x402.
+**60+ models** — image, video, video editing, music, speech — with **no signup and
+no API key**. Each `generate` is paid per call from **your own wallet** over MPP / x402.
 
 - Browse + price models for free (`list_models`, `get_price`, `get_schema`).
 - `generate` runs a model and settles the gateway's 402 from your wallet (USDC on
@@ -17,6 +17,20 @@ Each `generate` is paid per call from **your own wallet** over MPP / x402.
 | `get_price` | free | Exact cost of one call (input affects it — video duration, TTS length). |
 | `get_schema` | free | A model's input fields (required, defaults). |
 | `generate` | **paid** | Run a model → media URL. Pays from your wallet. |
+
+### File inputs
+
+Models that take a source file (image-to-video, video-to-video, transcription) accept
+a **public URL** in their file field (e.g. `image`, `video_uri`). Have a local file?
+Upload it first — no key, no payment:
+
+```bash
+curl -X POST https://api.glianalabs.com/v1/media \
+  -H "content-type: video/mp4" --data-binary @clip.mp4
+# → { "url": "https://api.glianalabs.com/v1/media/<id>.mp4" }
+```
+
+Pass the returned `url` into the model field. Max 40 MB; video / image / audio only.
 
 ## Install
 
