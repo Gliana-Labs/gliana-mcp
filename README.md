@@ -1,7 +1,7 @@
 # GlianaAI MCP server
 
 Pay-per-call generative AI for any MCP client (Claude Desktop, Cursor, …).
-**60+ models** — image, video, video editing, music, speech — with **no signup and
+**70+ models** — image, video, video editing, music, speech — with **no signup and
 no API key**. Each `generate` is paid per call from **your own wallet** over MPP / x402.
 
 - Browse + price models for free (`list_models`, `get_price`, `get_schema`).
