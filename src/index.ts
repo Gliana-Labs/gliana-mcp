@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GlianaAI MCP server — exposes pay-per-call generative AI (70+ models: image,
+ * GlianaAI MCP server — exposes pay-per-call generative AI (60+ models: image,
  * video, music, speech) to any MCP client (Claude Desktop, Cursor, …).
  *
  * Discovery tools (list_models / get_price / get_schema) are free. `generate`
@@ -124,7 +124,7 @@ const server = new McpServer(
   },
   {
     instructions:
-      'GlianaAI — pay-per-call generative AI across 70+ models (image, video, music, speech). No signup or ' +
+      'GlianaAI — pay-per-call generative AI across 60+ models (image, video, music, speech). No signup or ' +
       'API key. list_models to browse, get_price to quote, get_schema for inputs, generate to run (paid from ' +
       'your own wallet over base/tempo/solana). Set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY to enable generate.',
   },
