@@ -39,8 +39,10 @@ console.error(`Paying via ${RAIL} → POST ${API}/v1/infer (model tts-1, ~$0.001
 const run = () => Mppx.create({ methods: [method], polyfill: false })
   .fetch(`${API}/v1/infer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
 
-let res = await run();
-if (res.status === 402) res = await run(); // retry once with a fresh challenge
+// SINGLE attempt — no auto-retry. The gateway broadcasts the signed Solana tx,
+// so a retry double-broadcasts and double-charges the wallet. Re-run the script
+// to retry deliberately.
+const res = await run();
 
 const text = await res.text();
 console.error(`HTTP ${res.status}`);

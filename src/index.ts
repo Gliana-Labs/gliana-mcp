@@ -237,11 +237,14 @@ server.registerTool(
       return mppx.fetch(`${API}/v1/infer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
     };
 
-    let res = await run();
-    if (res.status === 402) res = await run(); // one retry with a fresh challenge
+    // SINGLE attempt — never auto-retry. On Solana the gateway BROADCASTS the
+    // signed tx, so a retry broadcasts a SECOND transaction and the wallet pays
+    // TWICE (a 402 can be an in-flight tx the gateway couldn't confirm in time,
+    // not a true failure). The caller re-invokes generate to retry deliberately.
+    const res = await run();
 
     if (res.status === 402)
-      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain and try again.`);
+      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call generate again.`);
     if (res.status === 400) {
       const e = (await res.json().catch(() => ({}))) as { detail?: string };
       return fail(`Missing/invalid input (no charge): ${e.detail ?? 'see get_schema'}`);
