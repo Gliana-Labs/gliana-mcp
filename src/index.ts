@@ -275,13 +275,12 @@ server.registerTool(
   {
     description:
       'Run a paid UTILITY tool (not an AI model). PAID: settles a flat price from your wallet (base/tempo/solana). ' +
-      'Tools: `scrape` {url}→markdown, `screenshot` {url}→PNG url, `og-image` {title,subtitle?}→1200×630 card url, ' +
-      '`youtube-thumbnail` {title,subtitle?,background?}→1280×720 url, `rpc` {chain,method,params?}→JSON-RPC result, ' +
-      '`token-price` {ids,vs?}→spot prices. See https://ai.glianalabs.com/docs#tools.',
+      'Tools: `scrape` {url}→markdown, `screenshot` {url}→PNG url, `og-image`/`quote-card`/`code-image`/`tweet-image` ' +
+      '{…}→PNG url, `youtube-thumbnail` {title,background?}→PNG, `meme` {image,top?,bottom?}→PNG, `card` {preset,title}→PNG ' +
+      '(preset: og/instagram-square/story/linkedin/podcast), `auto-og` {url}→PNG (scrape+render), `rpc` {chain,method,params?}, ' +
+      '`token-price` {ids,vs?}. Full list: GET /openapi.json or https://ai.glianalabs.com/docs#tools.',
     inputSchema: {
-      name: z
-        .enum(['scrape', 'screenshot', 'og-image', 'youtube-thumbnail', 'rpc', 'token-price'])
-        .describe('Which utility tool to run.'),
+      name: z.string().describe('Utility tool name, e.g. scrape, screenshot, og-image, youtube-thumbnail, quote-card, code-image, tweet-image, meme, card, auto-og, rpc, token-price.'),
       args: z.record(z.any()).describe("The tool's input body, e.g. { url } for scrape, { ids } for token-price."),
     },
     outputSchema: {
