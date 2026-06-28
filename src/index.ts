@@ -326,6 +326,60 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'recipe',
+  {
+    description:
+      'Run a paid multi-model RECIPE pipeline (chains models in one call). PAID: settles the SUM of the steps from ' +
+      'your wallet (base/tempo/solana). Recipes: `image-to-video` {prompt,motionPrompt?} text→image→animated video ' +
+      '(3-8x cheaper than a native text-to-video model), `image-to-video-hd` (crisper still), `image-to-video-audio` ' +
+      '(video with sound). Override steps with { imageModel, videoModel }. See https://ai.glianalabs.com/docs#recipes.',
+    inputSchema: {
+      name: z.string().describe('Recipe name: image-to-video, image-to-video-hd, or image-to-video-audio.'),
+      args: z.record(z.any()).describe('Recipe input, e.g. { prompt, motionPrompt?, duration?, resolution? }.'),
+    },
+    outputSchema: {
+      recipe: z.string(),
+      costMicroUsd: z.number(),
+      costUsd: z.string(),
+      rail: z.string(),
+      url: z.string().optional().describe('Final media URL (the last step).'),
+      result: z.any().describe('Each step output.'),
+    },
+    annotations: { title: 'Recipe (paid)', readOnlyHint: false, openWorldHint: true },
+  },
+  async ({ name, args }) => {
+    const picked = resolveRail();
+    if ('error' in picked) return fail(picked.error);
+    const { rail, method } = picked;
+
+    // SINGLE attempt — same reason as generate (Solana broadcasts; a retry double-pays).
+    const mppx = Mppx.create({ methods: [method] as never, polyfill: false });
+    const res = await mppx.fetch(`${API}/v1/recipes/${name}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(args ?? {}),
+    });
+
+    if (res.status === 402)
+      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call recipe again.`);
+    if (res.status === 400 || res.status === 404) {
+      const e = (await res.json().catch(() => ({}))) as { detail?: string };
+      return fail(`Bad request (no charge): ${e.detail ?? 'see https://ai.glianalabs.com/docs#recipes'}`);
+    }
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+      return fail(e.detail ?? e.error ?? `Request failed (HTTP ${res.status})`);
+    }
+
+    const r = (await res.json()) as { recipe?: string; costMicroUsd?: number; url?: string; [k: string]: unknown };
+    const cost = usd(r.costMicroUsd ?? 0);
+    const { recipe: _r, costMicroUsd: _c, ...result } = r;
+    const structured = { recipe: name, costMicroUsd: r.costMicroUsd ?? 0, costUsd: cost, rail, url: r.url, result };
+    return okv(`${name} → ${r.url ?? '(no url)'}\ncharged ${cost} via ${rail}`, structured);
+  },
+);
+
 async function main() {
   if (RAW_SOL) {
     try {
