@@ -333,9 +333,10 @@ server.registerTool(
       'Run a paid multi-model RECIPE pipeline (chains models in one call). PAID: settles the SUM of the steps from ' +
       'your wallet (base/tempo/solana). Recipes: `image-to-video` {prompt,motionPrompt?} text→image→animated video ' +
       '(3-8x cheaper than a native text-to-video model), `image-to-video-hd` (crisper still), `image-to-video-audio` ' +
-      '(video with sound). Override steps with { imageModel, videoModel }. See https://ai.glianalabs.com/docs#recipes.',
+      '(video with sound), `brainrot-video` {motionPrompt?,reference_image?} random Italian-brainrot creature → video ' +
+      'with audio (no prompt). Override steps with { imageModel, videoModel }. See https://ai.glianalabs.com/docs#recipes.',
     inputSchema: {
-      name: z.string().describe('Recipe name: image-to-video, image-to-video-hd, or image-to-video-audio.'),
+      name: z.string().describe('Recipe name: image-to-video, image-to-video-hd, image-to-video-audio, or brainrot-video.'),
       args: z.record(z.any()).describe('Recipe input, e.g. { prompt, motionPrompt?, duration?, resolution? }.'),
     },
     outputSchema: {
