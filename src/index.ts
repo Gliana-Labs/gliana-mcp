@@ -270,6 +270,63 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'tool',
+  {
+    description:
+      'Run a paid UTILITY tool (not an AI model). PAID: settles a flat price from your wallet (base/tempo/solana). ' +
+      'Tools: `scrape` {url}→markdown, `screenshot` {url}→PNG url, `og-image` {title,subtitle?}→1200×630 card url, ' +
+      '`youtube-thumbnail` {title,subtitle?,background?}→1280×720 url, `rpc` {chain,method,params?}→JSON-RPC result, ' +
+      '`token-price` {ids,vs?}→spot prices. See https://ai.glianalabs.com/docs#tools.',
+    inputSchema: {
+      name: z
+        .enum(['scrape', 'screenshot', 'og-image', 'youtube-thumbnail', 'rpc', 'token-price'])
+        .describe('Which utility tool to run.'),
+      args: z.record(z.any()).describe("The tool's input body, e.g. { url } for scrape, { ids } for token-price."),
+    },
+    outputSchema: {
+      tool: z.string(),
+      costMicroUsd: z.number(),
+      costUsd: z.string(),
+      rail: z.string(),
+      result: z.any().describe('Tool result (markdown, url, prices, or rpc result).'),
+    },
+    annotations: { title: 'Utility tool (paid)', readOnlyHint: false, openWorldHint: true },
+  },
+  async ({ name, args }) => {
+    const picked = resolveRail();
+    if ('error' in picked) return fail(picked.error);
+    const { rail, method } = picked;
+
+    const body = JSON.stringify(args ?? {});
+    // SINGLE attempt — same reason as generate (Solana broadcasts; a retry double-pays).
+    const mppx = Mppx.create({ methods: [method] as never, polyfill: false });
+    const res = await mppx.fetch(`${API}/v1/tools/${name}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+
+    if (res.status === 402)
+      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call tool again.`);
+    if (res.status === 400) {
+      const e = (await res.json().catch(() => ({}))) as { detail?: string };
+      return fail(`Missing/invalid input (no charge): ${e.detail ?? 'see https://ai.glianalabs.com/docs#tools'}`);
+    }
+    if (res.status === 503) return fail(`Tool "${name}" is not enabled on this server.`);
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+      return fail(e.detail ?? e.error ?? `Request failed (HTTP ${res.status})`);
+    }
+
+    const r = (await res.json()) as { tool?: string; costMicroUsd?: number; [k: string]: unknown };
+    const cost = usd(r.costMicroUsd ?? 0);
+    const { tool: _t, costMicroUsd: _c, ...result } = r;
+    const structured = { tool: name, costMicroUsd: r.costMicroUsd ?? 0, costUsd: cost, rail, result };
+    return okv(`${name} (charged ${cost} via ${rail}):\n${JSON.stringify(result, null, 2)}`, structured);
+  },
+);
+
 async function main() {
   if (RAW_SOL) {
     try {
