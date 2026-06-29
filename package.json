@@ -1,6 +1,6 @@
 {
   "name": "gliana-ai-mcp",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "MCP server for GlianaAI — pay-per-call generative AI across 59 models (image, video, music, speech). No signup or API key; each generate is paid per call from your own wallet over MPP / x402.",
   "type": "module",
   "bin": {
