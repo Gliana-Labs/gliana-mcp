@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * GlianaAI MCP server — exposes pay-per-call generative AI (60+ models: image,
- * video, music, speech) to any MCP client (Claude Desktop, Cursor, …).
+ * GlianaAI MCP server — exposes pay-per-call generative AI (70+ models: LLM chat/text,
+ * image, video, music, speech) to any MCP client (Claude Desktop, Cursor, …).
  *
  * Discovery tools (list_models / get_price / get_schema) are free. `generate`
  * runs a model and settles the gateway's 402 from YOUR wallet via mppx. One
@@ -124,7 +124,7 @@ const server = new McpServer(
   },
   {
     instructions:
-      'GlianaAI — pay-per-call generative AI across 60+ models (image, video, music, speech). No signup or ' +
+      'GlianaAI — pay-per-call generative AI across 70+ models (LLM chat/text, image, video, music, speech). No signup or ' +
       'API key. list_models to browse, get_price to quote, get_schema for inputs, generate to run (paid from ' +
       'your own wallet over base/tempo/solana). Set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY to enable generate.',
   },
@@ -210,7 +210,7 @@ server.registerTool(
   'generate',
   {
     description:
-      'Run a model and return the result (media URL). PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost. File inputs (image/video/audio, e.g. image-to-video or video-to-video `video_uri`) take a public URL — upload a local file with POST /v1/media (≤40MB) to get one. Array file fields (e.g. `images`, `reference_images` for multi-reference models) take an ARRAY of such URLs.',
+      'Run a model and return the result — a media URL for image/video/audio/music models, assistant text for text (LLM) models. Text models take OpenAI-style input: { messages: [{ role, content }, …], max_tokens? }. PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost. File inputs (image/video/audio, e.g. image-to-video or video-to-video `video_uri`) take a public URL — upload a local file with POST /v1/media (≤40MB) to get one. Array file fields (e.g. `images`, `reference_images` for multi-reference models) take an ARRAY of such URLs.',
     inputSchema: {
       model: z.string().describe('Model id from list_models.'),
       input: z.record(z.any()).describe('Model input, e.g. { prompt: "a red fox" } or { text: "hello" }. See get_schema.'),
