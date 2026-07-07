@@ -279,10 +279,11 @@ server.registerTool(
       '{…}→PNG url, `youtube-thumbnail` {title,background?}→PNG, `meme` {image,top?,bottom?}→PNG, `card` {preset,title}→PNG ' +
       '(preset: og/instagram-square/story/linkedin/podcast), `auto-og` {url}→PNG (scrape+render), `rpc` {chain,method,params?}, ' +
       '`token-price` {ids,vs?}, `face-detect` {image_url|image_base64}→face boxes, `face-embed` {image_url|image_base64}→512-d ' +
-      'ArcFace vector per face, `face-compare` {a:{image_url},b:{image_url}}→cosine similarity + match. ' +
+      'ArcFace vector per face, `face-compare` {a:{image_url},b:{image_url}}→cosine similarity + match, ' +
+      '`youtube-summary` {url,style?:bullets|paragraph|chapters,language?}→AI summary of a YouTube video (≤60 min). ' +
       'Full list: GET /openapi.json or https://ai.glianalabs.com/docs#tools.',
     inputSchema: {
-      name: z.string().describe('Utility tool name, e.g. scrape, screenshot, og-image, youtube-thumbnail, quote-card, code-image, tweet-image, meme, card, auto-og, rpc, token-price, face-detect, face-embed, face-compare.'),
+      name: z.string().describe('Utility tool name, e.g. scrape, screenshot, og-image, youtube-thumbnail, quote-card, code-image, tweet-image, meme, card, auto-og, rpc, token-price, face-detect, face-embed, face-compare, youtube-summary.'),
       args: z.record(z.any()).describe("The tool's input body, e.g. { url } for scrape, { ids } for token-price."),
     },
     outputSchema: {
