@@ -1,10 +1,12 @@
 # GlianaAI MCP server
 
 Pay-per-call generative AI for any MCP client (Claude Desktop, Cursor, …).
-**70+ models** — image, video, video editing, music, speech — with **no signup and
-no API key**. Each `generate` is paid per call from **your own wallet** over MPP / x402.
+**90+ models** — image, video, video editing, music, speech, LLM chat — plus utility
+and data tools, with **no signup and no API key**. Paid calls settle per call from
+**your own wallet** over MPP / x402.
 
-- Browse + price models for free (`list_models`, `get_price`, `get_schema`).
+- Browse + price everything for free (`list_models`, `get_price`, `get_schema`,
+  `list_tools`).
 - `generate` runs a model and settles the gateway's 402 from your wallet (USDC on
   Base). Your private key is read from the client config and **never leaves your
   machine** — non-custodial, same model as [ai.glianalabs.com](https://ai.glianalabs.com).
@@ -16,7 +18,18 @@ no API key**. Each `generate` is paid per call from **your own wallet** over MPP
 | `list_models` | free | Every model: id, category, provider, per-call price. |
 | `get_price` | free | Exact cost of one call (input affects it — video duration, TTS length). |
 | `get_schema` | free | A model's input fields (required, defaults). |
-| `generate` | **paid** | Run a model → media URL. Pays from your wallet. |
+| `generate` | **paid** | Run a model → media URL, or assistant text for chat models. |
+| `list_tools` | free | Every utility tool: price, HTTP method, example input, guidance. |
+| `tool` | mostly **paid** | Run one utility tool — scraping, screenshots, social cards, OCR, structured extraction, market data, chain RPC, reference data. |
+| `recipe` | **paid** | Run a multi-model pipeline in one call (e.g. text→image→video). |
+
+`list_tools` reads the gateway live, so it is never out of date — which is why this
+table doesn't enumerate the utility tools. A written-down list goes stale the moment
+a new endpoint ships, and this one had.
+
+Some utility tools are **free and need no wallet at all** (`list_tools` reports them
+at `priceMicroUsd: 0`) — currently the Indonesian reference endpoints: official
+region data, prayer times, and NIK verification.
 
 ### File inputs
 
@@ -66,7 +79,8 @@ Add to your MCP client config.
   `solana` if only a Solana key is set). The wallet must hold USDC on that chain.
 - `GLIANA_API_URL` — optional, defaults to `https://api.glianalabs.com`.
 
-Keys are needed only for `generate`; the discovery tools work without any.
+Keys are needed only for paid calls. The discovery tools — and the free utility
+tools `list_tools` reports at `priceMicroUsd: 0` — work without any wallet.
 
 Restart the client. Ask it to *"list GlianaAI models"* or *"generate an image of a
 red fox with nano-banana-2"*.
