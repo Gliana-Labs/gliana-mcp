@@ -108,13 +108,45 @@ function mediaUrl(output: unknown): string | null {
 }
 
 type CatalogModel = { id: string; provider: string; category: string; unit: string; priceLabel: string };
+
+/**
+ * A utility tool as the gateway describes itself at GET /v1/tools.
+ *
+ * Fetched live rather than hardcoded here. The gateway is the single source for
+ * the catalog, prices and schemas already (that's why list_models exists), and
+ * the tool list had drifted for exactly the reason a hardcoded list always does:
+ * six endpoints shipped and this file still advertised the old ten. Reading the
+ * listing means a new endpoint is usable from MCP the moment it deploys, with no
+ * npm release.
+ *
+ * `method` matters: the free reference endpoints are GET with query parameters,
+ * so a POST-only runner cannot reach them at all. `priceMicroUsd === 0` marks the
+ * ones that need no wallet.
+ */
+type UtilityTool = {
+  name: string;
+  path: string;
+  method?: 'GET' | 'POST';
+  priceMicroUsd: number;
+  example?: Record<string, unknown>;
+  guidance?: string;
+};
+
+/** Cached for the process; the listing itself is edge-cached for 5 minutes. */
+let toolCatalog: UtilityTool[] | null = null;
+async function listTools(): Promise<UtilityTool[]> {
+  if (toolCatalog) return toolCatalog;
+  const { tools } = await getJson<{ tools: UtilityTool[] }>('/v1/tools');
+  toolCatalog = tools;
+  return tools;
+}
 type Price = { model: string; costMicroUsd: number; unit: string; units: number };
 type InferResult = { model: string; costMicroUsd: number; output: unknown };
 
 const server = new McpServer(
   {
     name: 'gliana-ai',
-    version: '0.3.0',
+    version: '0.5.0',
     title: 'GlianaAI',
     websiteUrl: 'https://ai.glianalabs.com',
     icons: [
@@ -124,9 +156,11 @@ const server = new McpServer(
   },
   {
     instructions:
-      'GlianaAI — pay-per-call generative AI across 70+ models (LLM chat/text, image, video, music, speech). No signup or ' +
-      'API key. list_models to browse, get_price to quote, get_schema for inputs, generate to run (paid from ' +
-      'your own wallet over base/tempo/solana). Set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY to enable generate.',
+      'GlianaAI — pay-per-call generative AI across 90+ models (LLM chat/text, image, video, music, speech) plus utility ' +
+      'and data tools. No signup or API key. list_models to browse models, get_price to quote, get_schema for inputs, ' +
+      'generate to run one. list_tools to browse utility tools (scraping, OCR, extraction, reference data), then `tool` ' +
+      'to run one; recipe for multi-model pipelines. Discovery is free, and some utility tools are free too — ' +
+      'list_tools reports those at priceMicroUsd 0. Set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY to pay for the rest.',
   },
 );
 
@@ -270,21 +304,62 @@ server.registerTool(
   },
 );
 
+/**
+ * The utility-tool equivalent of list_models. Exists so no client, and no
+ * description in this file, has to carry a hardcoded list that goes stale.
+ */
+server.registerTool(
+  'list_tools',
+  {
+    description:
+      'List every GlianaAI utility tool (name, HTTP method, per-call price, an example input, and usage guidance), read ' +
+      'live from the gateway so it is always current. Free — no payment. Call this before `tool` to pick one and learn ' +
+      'its input shape. Tools reported at priceMicroUsd 0 are free to call and need no wallet.',
+    inputSchema: {},
+    outputSchema: {
+      tools: z.array(
+        z.object({
+          name: z.string(),
+          method: z.string().describe('GET tools take query parameters; POST tools take a JSON body.'),
+          priceMicroUsd: z.number().describe('0 means free — no wallet needed.'),
+          priceUsd: z.string(),
+          example: z.record(z.any()),
+          guidance: z.string(),
+        }),
+      ),
+    },
+    annotations: { title: 'List utility tools', readOnlyHint: true, openWorldHint: false },
+  },
+  async () => {
+    const all = await listTools();
+    const tools = all.map((t) => ({
+      name: t.name,
+      method: t.method ?? 'POST',
+      priceMicroUsd: t.priceMicroUsd,
+      priceUsd: usd(t.priceMicroUsd),
+      example: t.example ?? {},
+      guidance: t.guidance ?? '',
+    }));
+    const lines = tools.map(
+      (t) => `- ${t.name} (${t.method}, ${t.priceMicroUsd === 0 ? 'free' : t.priceUsd}) ${t.guidance || ''}`.trim(),
+    );
+    return okv(`${tools.length} utility tools:\n${lines.join('\n')}`, { tools });
+  },
+);
+
 server.registerTool(
   'tool',
   {
     description:
-      'Run a paid UTILITY tool (not an AI model). PAID: settles a flat price from your wallet (base/tempo/solana). ' +
-      'Tools: `scrape` {url}→markdown, `screenshot` {url}→PNG url, `og-image`/`quote-card`/`code-image`/`tweet-image` ' +
-      '{…}→PNG url, `youtube-thumbnail` {title,background?}→PNG, `meme` {image,top?,bottom?}→PNG, `card` {preset,title}→PNG ' +
-      '(preset: og/instagram-square/story/linkedin/podcast), `auto-og` {url}→PNG (scrape+render), `rpc` {chain,method,params?}, ' +
-      '`token-price` {ids,vs?}, `face-detect` {image_url|image_base64}→face boxes, `face-embed` {image_url|image_base64}→512-d ' +
-      'ArcFace vector per face, `face-compare` {a:{image_url},b:{image_url}}→cosine similarity + match, ' +
-      '`youtube-summary` {url,style?:bullets|paragraph|chapters,language?}→AI summary of a YouTube video (≤60 min). ' +
-      'Full list: GET /openapi.json or https://ai.glianalabs.com/docs#tools.',
+      'Run a UTILITY tool (not an AI model) — scraping, screenshots, social cards, market data, chain RPC, ' +
+      'OCR, address parsing, structured extraction, Indonesian reference data. ' +
+      'Call list_tools FIRST for the live list with prices and input shapes: it is read from the gateway, so it is ' +
+      'never out of date, and this description deliberately does not enumerate them. ' +
+      'Most tools are PAID and settle a flat price from your wallet (base/tempo/solana); the ones list_tools reports ' +
+      'at priceMicroUsd 0 are free and need no wallet at all.',
     inputSchema: {
-      name: z.string().describe('Utility tool name, e.g. scrape, screenshot, og-image, youtube-thumbnail, quote-card, code-image, tweet-image, meme, card, auto-og, rpc, token-price, face-detect, face-embed, face-compare, youtube-summary.'),
-      args: z.record(z.any()).describe("The tool's input body, e.g. { url } for scrape, { ids } for token-price."),
+      name: z.string().describe('Utility tool name exactly as list_tools reports it, e.g. scrape, ocr-id, address-id, extract, exchange-rate, prayer-times.'),
+      args: z.record(z.any()).describe("The tool's input, as list_tools shows in `example`. For GET tools these become query parameters; for POST tools, the JSON body."),
     },
     outputSchema: {
       tool: z.string(),
@@ -296,6 +371,34 @@ server.registerTool(
     annotations: { title: 'Utility tool (paid)', readOnlyHint: false, openWorldHint: true },
   },
   async ({ name, args }) => {
+    // Ask the gateway what this tool is before deciding how to call it. A tool we
+    // don't recognise is still attempted as a paid POST, so a brand-new endpoint
+    // works without waiting for an npm release.
+    const known = await listTools()
+      .then((all) => all.find((t) => t.name === name))
+      .catch(() => undefined);
+
+    // FREE + GET: the reference endpoints (wilayah, prayer-times, verify-nik) take
+    // query parameters and cost nothing, so they need no wallet and must not go
+    // through a payment attempt. Before this they were unreachable from MCP —
+    // the runner only ever POSTed a JSON body.
+    if (known && known.priceMicroUsd === 0 && known.method === 'GET') {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(args ?? {})) {
+        if (v !== undefined && v !== null) qs.set(k, String(v));
+      }
+      const res = await fetch(`${API}/v1/tools/${name}?${qs}`, { headers: { accept: 'application/json' } });
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) return fail(String(j.detail ?? j.error ?? `Request failed (HTTP ${res.status})`));
+      return okv(`${name} (free):\n${JSON.stringify(j, null, 2)}`, {
+        tool: name,
+        costMicroUsd: 0,
+        costUsd: '$0.0000',
+        rail: 'none',
+        result: j,
+      });
+    }
+
     const picked = resolveRail();
     if ('error' in picked) return fail(picked.error);
     const { rail, method } = picked;
