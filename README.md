@@ -58,7 +58,7 @@ Add to your MCP client config.
       "command": "npx",
       "args": ["-y", "gliana-ai-mcp"],
       "env": {
-        "GLIANA_WALLET_KEY": "0xYOUR_EVM_PRIVATE_KEY"
+        "GLIANA_WALLET_KEY_FILE": "/absolute/path/to/gliana-wallet.key"
       }
     }
   }
@@ -69,11 +69,26 @@ Add to your MCP client config.
 
 `generate` settles the gateway's 402 from your wallet. Pick a rail and set its key:
 
+> **Use a dedicated wallet, funded with only what you intend to spend.**
+> This server signs payments locally — the key never leaves your machine and is
+> never sent to us — but it is still a private key on a machine running an AI
+> agent. Do not use a wallet that holds anything you would miss.
+>
+> **Prefer `*_KEY_FILE` over the inline variable.** Your MCP client config gets
+> synced to cloud storage, committed by accident, and screenshotted when you ask
+> someone for help. A file you `chmod 600` does not:
+>
+> ```bash
+> printf '%s' '0xYOUR_KEY' > ~/.gliana-wallet.key && chmod 600 ~/.gliana-wallet.key
+> ```
+>
+> Inline still works if you prefer it — the server just warns on stderr.
+
 | Rail | Env var | Wallet needs |
 |------|---------|--------------|
-| **base** (default) | `GLIANA_WALLET_KEY` (0x EVM key) | USDC on Base — gasless EIP-3009 signature |
-| **tempo** | `GLIANA_WALLET_KEY` (same 0x key) | USDC on Tempo |
-| **solana** | `GLIANA_SOLANA_KEY` (base58 or JSON-array secret key) | USDC on Solana |
+| **base** (default) | `GLIANA_WALLET_KEY_FILE` or `GLIANA_WALLET_KEY` (0x EVM key) | USDC on Base — gasless EIP-3009 signature |
+| **tempo** | same key as base | USDC on Tempo |
+| **solana** | `GLIANA_SOLANA_KEY_FILE` or `GLIANA_SOLANA_KEY` (base58 or JSON-array secret key) | USDC on Solana |
 
 - `GLIANA_RAIL` — `base` \| `tempo` \| `solana`. Optional; defaults to `base` (or
   `solana` if only a Solana key is set). The wallet must hold USDC on that chain.

@@ -1,7 +1,7 @@
 {
   "name": "gliana-ai-mcp",
   "version": "0.5.0",
-  "description": "MCP server for GlianaAI \u2014 pay-per-call generative AI across 59 models (image, video, music, speech). No signup or API key; each generate is paid per call from your own wallet over MPP / x402.",
+  "description": "MCP server for GlianaAI — pay-per-call generative AI across 90+ models (image, video, music, speech, LLM chat). No signup, no API key; each call settles as a USDC micropayment from your own wallet.",
   "type": "module",
   "bin": {
     "gliana-ai-mcp": "dist/index.js"
@@ -46,7 +46,7 @@
     "pay-per-call",
     "gliana"
   ],
-  "author": "Gliana Labs",
+  "author": "PT Glianalabs Algoritma Desentralisasi <contact@glianalabs.com> (https://glianalabs.com)",
   "license": "MIT",
   "homepage": "https://ai.glianalabs.com",
   "repository": {

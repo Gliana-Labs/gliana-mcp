@@ -20,6 +20,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Mppx, evm, tempo } from 'mppx/client';
 import { solana } from '@solana/mpp/client';
+import { readFileSync } from 'node:fs';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createKeyPairSignerFromBytes, createKeyPairSignerFromPrivateKeyBytes } from '@solana/kit';
 import bs58 from 'bs58';
@@ -27,8 +28,41 @@ import { z } from 'zod';
 
 const API = (process.env.GLIANA_API_URL ?? 'https://api.glianalabs.com').replace(/\/+$/, '');
 
-const RAW_EVM = process.env.GLIANA_WALLET_KEY?.trim();
-const RAW_SOL = process.env.GLIANA_SOLANA_KEY?.trim();
+/**
+ * Read a key, preferring a FILE over an inline value.
+ *
+ * An inline key lives in the MCP client's config JSON — a file that gets synced
+ * to cloud storage, committed by accident, and screenshotted when someone asks
+ * for help. `*_KEY_FILE` points at a file you control the permissions on, so
+ * the secret never enters the config at all.
+ *
+ * Inline still works: breaking existing installs to make a point would be
+ * worse than the risk. But the file path is documented first and warned about
+ * here, because "paste your private key into this JSON" is a fair thing for a
+ * reviewer to refuse.
+ */
+function readKey(name: string): string | undefined {
+  const file = process.env[`${name}_FILE`]?.trim();
+  if (file) {
+    try {
+      return readFileSync(file, 'utf8').trim();
+    } catch (err) {
+      console.error(`${name}_FILE could not be read (${String(err).slice(0, 80)}) — that rail is disabled.`);
+      return undefined;
+    }
+  }
+  const inline = process.env[name]?.trim();
+  if (inline) {
+    console.error(
+      `${name} was supplied inline. Prefer ${name}_FILE=/path/to/key (chmod 600) so the key is not stored ` +
+        'in your MCP client config. Use a dedicated wallet holding only what you intend to spend.',
+    );
+  }
+  return inline;
+}
+
+const RAW_EVM = readKey('GLIANA_WALLET_KEY');
+const RAW_SOL = readKey('GLIANA_SOLANA_KEY');
 const RAIL = (process.env.GLIANA_RAIL ?? '').trim().toLowerCase();
 
 // EVM account (Base + Tempo) from a 0x key — signs locally, no gas for the USDC transfer.
