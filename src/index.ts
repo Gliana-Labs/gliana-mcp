@@ -177,10 +177,27 @@ async function listTools(): Promise<UtilityTool[]> {
 type Price = { model: string; costMicroUsd: number; unit: string; units: number };
 type InferResult = { model: string; costMicroUsd: number; output: unknown };
 
+/**
+ * The published version, read from package.json at startup so it cannot drift
+ * from what npm actually shipped. `files: ['dist']` means package.json sits one
+ * level above the bundled entry point.
+ */
+const PKG_VERSION: string = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version ?? '0.0.0';
+  } catch {
+    // Never let a packaging quirk stop the server from starting.
+    return '0.0.0';
+  }
+})();
+
 const server = new McpServer(
   {
     name: 'gliana-ai',
-    version: '0.5.0',
+    // Read from package.json, not typed twice. It had drifted to 0.5.0 while the
+    // package shipped 0.5.2, so every client — and Glama's introspection check —
+    // was told the wrong version.
+    version: PKG_VERSION,
     title: 'GlianaAI',
     websiteUrl: 'https://ai.glianalabs.com',
     icons: [
