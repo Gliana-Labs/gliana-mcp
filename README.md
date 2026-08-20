@@ -1,5 +1,8 @@
 # GlianaAI MCP server
 
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/gliana-labs/gliana-mcp)
+[Glama server page](https://glama.ai/mcp/servers/Gliana-Labs/gliana-mcp)
+
 Pay-per-call generative AI for any MCP client (Claude Desktop, Cursor, …).
 **90+ models** — image, video, video editing, music, speech, LLM chat — plus utility
 and data tools, with **no signup and no API key**. Paid calls settle per call from
