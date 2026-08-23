@@ -5,8 +5,8 @@
 [Glama server page](https://glama.ai/mcp/servers/Gliana-Labs/gliana-mcp)
 
 Pay-per-call generative AI for any MCP client (Claude Desktop, Cursor, …).
-**90+ models** — image, video, video editing, music, speech, LLM chat — plus utility
-and data tools, with **no signup and no API key**. Paid calls settle per call from
+**90+ models** — image, video, video editing, music, speech, LLM chat — plus utility,
+market-data and SEC-filing tools, with **no signup and no API key**. Paid calls settle per call from
 **your own wallet** over MPP / x402.
 
 - Browse + price everything for free (`list_models`, `get_price`, `get_schema`,

@@ -1,7 +1,7 @@
 {
   "name": "gliana-ai-mcp",
   "version": "0.5.2",
-  "description": "MCP server for GlianaAI — pay-per-call AI models, live market data and identity APIs. 90+ generative models (image, video, music, speech, LLM chat) plus crypto and FX rates, DEX liquidity, DeFi TVL, gas, web search, OCR and face matching. No signup, no API key; each call settles as a USDC micropayment from your own wallet.",
+  "description": "MCP server for GlianaAI — pay-per-call AI models, live market data, SEC filings and identity APIs. 90+ generative models (image, video, music, speech, LLM chat) plus crypto and FX rates, DEX liquidity, DeFi TVL, gas, US company fundamentals, SEC filings and insider trades, web search, OCR and face matching. No signup, no API key; each call settles as a USDC micropayment from your own wallet.",
   "type": "module",
   "bin": {
     "gliana-ai-mcp": "dist/index.js"
@@ -44,7 +44,10 @@
     "x402",
     "mpp",
     "pay-per-call",
-    "gliana"
+    "gliana",
+    "sec-edgar",
+    "stock-market",
+    "financial-data"
   ],
   "author": "PT Glianalabs Algoritma Desentralisasi <contact@glianalabs.com> (https://glianalabs.com)",
   "license": "MIT",
