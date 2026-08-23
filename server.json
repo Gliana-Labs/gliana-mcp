@@ -7,13 +7,13 @@
     "url": "https://github.com/Gliana-Labs/gliana-mcp",
     "source": "github"
   },
-  "version": "0.5.1",
+  "version": "0.5.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "gliana-ai-mcp",
-      "version": "0.5.1",
+      "version": "0.5.3",
       "transport": {
         "type": "stdio"
       },
