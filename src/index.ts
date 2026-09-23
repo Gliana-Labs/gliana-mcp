@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GlianaAI MCP server — exposes pay-per-call generative AI (70+ models: LLM chat/text,
+ * GlianaAI MCP server — exposes pay-per-call generative AI (100+ models: LLM chat/text,
  * image, video, music, speech) to any MCP client (Claude Desktop, Cursor, …).
  *
  * Discovery tools (list_models / get_price / get_schema) are free. `generate`
@@ -207,7 +207,7 @@ const server = new McpServer(
   },
   {
     instructions:
-      'GlianaAI — pay-per-call generative AI across 90+ models (LLM chat/text, image, video, music, speech) plus utility ' +
+      'GlianaAI — pay-per-call generative AI across 100+ models (LLM chat/text, image, video, music, speech) plus utility ' +
       'and data tools. No signup or API key. list_models to browse models, get_price to quote, get_schema for inputs, ' +
       'generate to run one. list_tools to browse utility tools (scraping, OCR, extraction, reference data), then `tool` ' +
       'to run one; recipe for multi-model pipelines. Discovery is free, and some utility tools are free too — ' +
