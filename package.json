@@ -1,7 +1,7 @@
 {
   "name": "gliana-ai-mcp",
   "version": "0.5.3",
-  "description": "MCP server for GlianaAI — pay-per-call AI models, live market data, SEC filings and identity APIs. 90+ generative models (image, video, music, speech, LLM chat) plus crypto and FX rates, DEX liquidity, DeFi TVL, gas, US company fundamentals, SEC filings and insider trades, web search, OCR and face matching. No signup, no API key; each call settles as a USDC micropayment from your own wallet.",
+  "description": "MCP server for GlianaAI \u2014 pay-per-call AI models, live market data, SEC filings and identity APIs. 90+ generative models (image, video, music, speech, LLM chat) plus crypto and FX rates, DEX liquidity, DeFi TVL, gas, US company fundamentals, SEC filings and insider trades, web search, OCR and face matching. No signup, no API key; each call settles as a USDC micropayment from your own wallet.",
   "type": "module",
   "bin": {
     "gliana-ai-mcp": "dist/index.js"
@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -28,10 +29,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
-    "@x402/evm": "^2.15.0",
-    "@x402/fetch": "^2.15.0",
-    "@x402/svm": "^2.15.0",
-    "typescript": "^5.6.0"
+    "@x402/evm": "^2.28.0",
+    "@x402/fetch": "^2.28.0",
+    "@x402/svm": "^2.28.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.12"
   },
   "keywords": [
     "mcp",

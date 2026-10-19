@@ -546,6 +546,24 @@ async function main() {
       console.error(`GLIANA_SOLANA_KEY invalid — solana disabled: ${(err as Error).message}`);
     }
   }
+
+  // `watch` runs INSTEAD of the MCP server: a poll loop that pays per call from
+  // the same wallet (see watch.ts). Imported dynamically so the server's start
+  // up never loads the x402 client stack it does not use — and so stdout, which
+  // is the MCP transport below, stays untouched when we are not watching.
+  if (process.argv[2] === 'watch') {
+    const { runWatch } = await import('./watch.js');
+    process.exit(
+      await runWatch(process.argv.slice(3), {
+        api: API,
+        evmAccount,
+        solanaSigner,
+        evmNetwork: process.env.GLIANA_EVM_NETWORK,
+        svmNetwork: process.env.GLIANA_SVM_NETWORK,
+      }),
+    );
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   const rails = [evmAccount && 'base', evmAccount && 'tempo', solanaSigner && 'solana'].filter(Boolean).join(', ') || 'none';

@@ -104,6 +104,40 @@ tools `list_tools` reports at `priceMicroUsd: 0` — work without any wallet.
 Restart the client. Ask it to *"list GlianaAI models"* or *"generate an image of a
 red fox with nano-banana-2"*.
 
+## `watch` — poll one endpoint on a timer
+
+The MCP server answers a client's questions. `watch` is the other shape: a loop
+that calls one cheap endpoint on a schedule and pays per call from the same
+wallet, printing one JSON line per poll so it composes with `jq` or a log drain.
+
+```bash
+# What would it cost? Reads the live 402 quote, pays nothing, needs no wallet.
+npx gliana-ai-mcp watch --tool token-price --input '{"symbol":"SOL"}' \
+  --budget 0.50 --dry-run
+# → {"costUsd":0.002,"pollsAffordable":250,"runtimeHours":4.17}
+
+# What is worth polling, with live prices?
+npx gliana-ai-mcp watch --list
+
+# Run it.
+npx gliana-ai-mcp watch --tool token-price --input '{"symbol":"SOL"}' \
+  --every 60 --budget 0.50
+# → {"t":"...","call":1,"costUsd":0.002,"spentUsd":0.002,"result":{...}}
+```
+
+`--budget <usd>` is **required** and is a hard stop — there is no default,
+because an unbounded spend loop is not something this command will do on your
+behalf. Before every poll it checks the budget against the *live* quote, so a
+price change is picked up immediately rather than at the price it started with.
+A call that fails after the money may already have moved is counted as spent and
+is never retried, since paying twice for one answer is worse than missing a tick.
+`Ctrl-C` prints a summary.
+
+Payment goes over the x402 rail (`/x402/tools/<name>`) rather than `/v1`. Same
+price and same handler; the difference is that x402 settles through a public
+facilitator, so the calls are independently verifiable and not just visible to
+us. `--rail base` (default with `GLIANA_WALLET_KEY`) or `--rail solana`.
+
 ## Funding
 
 Fund the wallet with a few dollars of USDC on your chosen chain (Base, Tempo, or
