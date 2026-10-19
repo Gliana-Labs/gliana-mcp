@@ -80,13 +80,17 @@ Two ways. **Pick the first one unless you specifically want the second.**
 "env": { "GLIANA_API_KEY": "gk_your_key" }
 ```
 
-Mint a key and top it up at [dashboard.glianalabs.com](https://dashboard.glianalabs.com)
-(card, or bank transfer / QRIS in rupiah). No signup is needed to *use* the
-gateway at all; the key only exists so a balance can be attached to it.
+Sign in at [dashboard.glianalabs.com](https://dashboard.glianalabs.com) with a
+Google account, mint a key, and top it up (card, or bank transfer / QRIS in
+rupiah). **This is the one route that needs an account** — option 2 below needs
+none at all.
 
 Paid calls then return `200` directly — no 402 handshake, nothing signed, no
 chain, no gas, and nothing in your config that can spend more than you loaded.
 Each key carries a daily cap on top of its balance.
+
+So the trade is: an account, in exchange for never putting a private key in a
+config file.
 
 `get_balance` (free) reports what is left, and every paid call appends the
 remaining balance to its result.
@@ -94,7 +98,8 @@ remaining balance to its result.
 #### 2. Your own wallet — pay per call from your own USDC
 
 The non-custodial route: the gateway's 402 is settled by a signature made on
-your machine. Nothing is held by us, and no account exists.
+your machine. **No account, no signup, no balance held by us** — that is the
+whole point of it.
 
 The cost is that a **private key has to live in your MCP client's config**,
 which is a fair thing for a reviewer to refuse. If that is a problem, use the
