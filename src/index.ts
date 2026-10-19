@@ -63,7 +63,31 @@ function readKey(name: string): string | undefined {
 
 const RAW_EVM = readKey('GLIANA_WALLET_KEY');
 const RAW_SOL = readKey('GLIANA_SOLANA_KEY');
+const RAW_API_KEY = readKey('GLIANA_API_KEY');
 const RAIL = (process.env.GLIANA_RAIL ?? '').trim().toLowerCase();
+
+/**
+ * The prepaid-balance key (`gk_…`), if one is configured.
+ *
+ * This is the rail that does NOT need a wallet. The gateway charges a prepaid
+ * balance behind the key and answers 200 directly — no 402 handshake, no
+ * signing, no chain, no gas. It is the only payment method here that does not
+ * require a private key in the MCP client's config file, which is the thing a
+ * reviewer can fairly refuse (see readKey above).
+ *
+ * Validated by SHAPE, not by a round trip: an obviously malformed value should
+ * say so at startup rather than failing on the first paid call. The gateway is
+ * the only authority on whether a well-formed key is real.
+ */
+function glianaKey(): string | null {
+  const k = RAW_API_KEY?.trim();
+  if (!k) return null;
+  if (!/^gk_[A-Za-z0-9_-]{8,}$/.test(k)) {
+    console.error('GLIANA_API_KEY does not look like a gateway key (expected gk_…) — the balance rail is disabled.');
+    return null;
+  }
+  return k;
+}
 
 // EVM account (Base + Tempo) from a 0x key — signs locally, no gas for the USDC transfer.
 let evmAccount: ReturnType<typeof privateKeyToAccount> | null = null;
@@ -89,7 +113,12 @@ async function buildSolanaSigner(key: string) {
 function resolveRail(): { rail: string; method: unknown } | { error: string } {
   const rail = RAIL || (evmAccount ? 'base' : solanaSigner ? 'solana' : '');
   if (!rail)
-    return { error: 'No wallet configured. Set GLIANA_WALLET_KEY (base/tempo) and/or GLIANA_SOLANA_KEY (solana) to enable generate.' };
+    return {
+      error:
+        'No payment method configured. Either set GLIANA_API_KEY (a gk_… key with a prepaid balance — no wallet, ' +
+        'no private key, top up at https://dashboard.glianalabs.com), or set GLIANA_WALLET_KEY (base/tempo) ' +
+        'and/or GLIANA_SOLANA_KEY (solana) to pay per call from your own wallet.',
+    };
   if (rail === 'base') {
     if (!evmAccount) return { error: 'GLIANA_RAIL=base needs GLIANA_WALLET_KEY (a 0x key holding USDC on Base).' };
     return { rail, method: evm({ account: evmAccount }) };
@@ -106,6 +135,62 @@ function resolveRail(): { rail: string; method: unknown } | { error: string } {
 }
 
 const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}`;
+
+/**
+ * Make one paid call, over whichever rail is configured.
+ *
+ * The `gk_` key WINS when both are present. That mirrors the gateway's own rule
+ * (lib/keys.ts: "a gk_ key is something the caller deliberately attached, so it
+ * wins") and it is the safer default: spending a prepaid balance someone topped
+ * up on purpose beats spending from a wallet whose key happens to be in the
+ * same config file.
+ *
+ * ONE attempt, never an automatic retry — on Solana the gateway BROADCASTS the
+ * signed transaction, so a retry broadcasts a second one and the wallet pays
+ * TWICE (a 402 can be an in-flight tx the gateway could not confirm in time,
+ * not a true failure). The caller re-invokes the tool to retry deliberately.
+ * The balance rail cannot double-charge this way, but the rule is kept uniform
+ * so no call site has to know which rail it got.
+ */
+async function paidFetch(path: string, body: string): Promise<{ rail: string; res: Response } | { error: string }> {
+  const key = glianaKey();
+  if (key) {
+    const res = await fetch(`${API}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body,
+    });
+    return { rail: 'balance', res };
+  }
+  const picked = resolveRail();
+  if ('error' in picked) return { error: picked.error };
+  // Fresh client per attempt so a stale 402 challenge is never reused.
+  const mppx = Mppx.create({ methods: [picked.method] as never, polyfill: false });
+  return { rail: picked.rail, res: await mppx.fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }) };
+}
+
+/**
+ * What to tell the caller about a 402, which means something different per rail.
+ *
+ * On the balance rail a 402 is NOT a failed settlement — it is the gateway
+ * saying "top up" or "daily cap", and it carries the instruction in the body.
+ * Telling someone to go fund a wallet would be wrong and confusing, so the
+ * gateway's own `detail` is relayed verbatim.
+ */
+async function paymentRefused(rail: string, res: Response, retryWhat: string): Promise<string> {
+  if (rail === 'balance') {
+    const e = (await res.json().catch(() => ({}))) as { error?: string; detail?: string; topup_url?: string };
+    const where = e.topup_url ? ` Top up: ${e.topup_url}` : '';
+    return `${e.detail ?? e.error ?? 'The prepaid balance could not cover this call.'}${where}`;
+  }
+  return `Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call ${retryWhat} again.`;
+}
+
+/** Remaining balance after a charge, when the gateway reported one. */
+const balanceNote = (res: Response): string => {
+  const left = res.headers.get('x-gliana-balance-micro-usd');
+  return left ? `, ${usd(Number(left))} left` : '';
+};
 
 async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(`${API}${path}`, { headers: { accept: 'application/json' } });
@@ -311,25 +396,12 @@ server.registerTool(
     annotations: { title: 'Generate (paid)', readOnlyHint: false, openWorldHint: true },
   },
   async ({ model, input }) => {
-    const picked = resolveRail();
-    if ('error' in picked) return fail(picked.error);
-    const { rail, method } = picked;
+    const paid = await paidFetch('/v1/infer', JSON.stringify({ model, ...input }));
+    if ('error' in paid) return fail(paid.error);
+    const { rail, res } = paid;
 
-    const body = JSON.stringify({ model, ...input });
-    const run = () => {
-      // Fresh client per attempt so a stale 402 challenge is never reused.
-      const mppx = Mppx.create({ methods: [method] as never, polyfill: false });
-      return mppx.fetch(`${API}/v1/infer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
-    };
-
-    // SINGLE attempt — never auto-retry. On Solana the gateway BROADCASTS the
-    // signed tx, so a retry broadcasts a SECOND transaction and the wallet pays
-    // TWICE (a 402 can be an in-flight tx the gateway couldn't confirm in time,
-    // not a true failure). The caller re-invokes generate to retry deliberately.
-    const res = await run();
-
-    if (res.status === 402)
-      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call generate again.`);
+    if (res.status === 401) return fail(await paymentRefused(rail, res, 'generate'));
+    if (res.status === 402) return fail(await paymentRefused(rail, res, 'generate'));
     if (res.status === 400) {
       const e = (await res.json().catch(() => ({}))) as { detail?: string };
       return fail(`Missing/invalid input (no charge): ${e.detail ?? 'see get_schema'}`);
@@ -350,8 +422,8 @@ server.registerTool(
       ...(url ? { url } : {}),
       output: result.output,
     };
-    if (url) return okv(`${result.model} → ${url}\ncharged ${cost} via ${rail}`, structured);
-    return okv(`${result.model} (charged ${cost} via ${rail}):\n${JSON.stringify(result.output, null, 2)}`, structured);
+    if (url) return okv(`${result.model} → ${url}\ncharged ${cost} via ${rail}${balanceNote(res)}`, structured);
+    return okv(`${result.model} (charged ${cost} via ${rail}${balanceNote(res)}):\n${JSON.stringify(result.output, null, 2)}`, structured);
   },
 );
 
@@ -450,21 +522,11 @@ server.registerTool(
       });
     }
 
-    const picked = resolveRail();
-    if ('error' in picked) return fail(picked.error);
-    const { rail, method } = picked;
+    const paid = await paidFetch(`/v1/tools/${name}`, JSON.stringify(args ?? {}));
+    if ('error' in paid) return fail(paid.error);
+    const { rail, res } = paid;
 
-    const body = JSON.stringify(args ?? {});
-    // SINGLE attempt — same reason as generate (Solana broadcasts; a retry double-pays).
-    const mppx = Mppx.create({ methods: [method] as never, polyfill: false });
-    const res = await mppx.fetch(`${API}/v1/tools/${name}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    });
-
-    if (res.status === 402)
-      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call tool again.`);
+    if (res.status === 401 || res.status === 402) return fail(await paymentRefused(rail, res, 'tool'));
     if (res.status === 400) {
       const e = (await res.json().catch(() => ({}))) as { detail?: string };
       return fail(`Missing/invalid input (no charge): ${e.detail ?? 'see https://ai.glianalabs.com/docs#tools'}`);
@@ -479,7 +541,7 @@ server.registerTool(
     const cost = usd(r.costMicroUsd ?? 0);
     const { tool: _t, costMicroUsd: _c, ...result } = r;
     const structured = { tool: name, costMicroUsd: r.costMicroUsd ?? 0, costUsd: cost, rail, result };
-    return okv(`${name} (charged ${cost} via ${rail}):\n${JSON.stringify(result, null, 2)}`, structured);
+    return okv(`${name} (charged ${cost} via ${rail}${balanceNote(res)}):\n${JSON.stringify(result, null, 2)}`, structured);
   },
 );
 
@@ -507,20 +569,11 @@ server.registerTool(
     annotations: { title: 'Recipe (paid)', readOnlyHint: false, openWorldHint: true },
   },
   async ({ name, args }) => {
-    const picked = resolveRail();
-    if ('error' in picked) return fail(picked.error);
-    const { rail, method } = picked;
+    const paid = await paidFetch(`/v1/recipes/${name}`, JSON.stringify(args ?? {}));
+    if ('error' in paid) return fail(paid.error);
+    const { rail, res } = paid;
 
-    // SINGLE attempt — same reason as generate (Solana broadcasts; a retry double-pays).
-    const mppx = Mppx.create({ methods: [method] as never, polyfill: false });
-    const res = await mppx.fetch(`${API}/v1/recipes/${name}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(args ?? {}),
-    });
-
-    if (res.status === 402)
-      return fail(`Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call recipe again.`);
+    if (res.status === 401 || res.status === 402) return fail(await paymentRefused(rail, res, 'recipe'));
     if (res.status === 400 || res.status === 404) {
       const e = (await res.json().catch(() => ({}))) as { detail?: string };
       return fail(`Bad request (no charge): ${e.detail ?? 'see https://ai.glianalabs.com/docs#recipes'}`);
@@ -534,7 +587,46 @@ server.registerTool(
     const cost = usd(r.costMicroUsd ?? 0);
     const { recipe: _r, costMicroUsd: _c, ...result } = r;
     const structured = { recipe: name, costMicroUsd: r.costMicroUsd ?? 0, costUsd: cost, rail, url: r.url, result };
-    return okv(`${name} → ${r.url ?? '(no url)'}\ncharged ${cost} via ${rail}`, structured);
+    return okv(`${name} → ${r.url ?? '(no url)'}\ncharged ${cost} via ${rail}${balanceNote(res)}`, structured);
+  },
+);
+
+server.registerTool(
+  'get_balance',
+  {
+    description:
+      'FREE. Remaining prepaid balance on the configured GLIANA_API_KEY. Call this before an expensive generate to ' +
+      'check there is enough, or after a paid call reports insufficient_balance. Returns an error when no gk_ key is ' +
+      'configured (this server is then paying per call from a wallet instead).',
+    inputSchema: {},
+    outputSchema: {
+      accountId: z.string(),
+      balanceMicroUsd: z.number(),
+      balanceUsd: z.string(),
+    },
+    annotations: { title: 'Get balance (free)', readOnlyHint: true, openWorldHint: true },
+  },
+  async () => {
+    const key = glianaKey();
+    if (!key)
+      return fail(
+        'No GLIANA_API_KEY configured, so there is no prepaid balance to report. Mint a key and top it up at ' +
+          'https://dashboard.glianalabs.com, or keep paying per call from a wallet.',
+      );
+    // GET /v1/keys/balance answers { account_id, balance_micro_usd, balance_usd }.
+    // The daily cap is NOT reported here — it only appears in a 402
+    // `daily_cap_reached` body, which paymentRefused relays verbatim.
+    const res = await fetch(`${API}/v1/keys/balance`, {
+      headers: { accept: 'application/json', authorization: `Bearer ${key}` },
+    });
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return fail(String(j.detail ?? j.error ?? `Could not read the balance (HTTP ${res.status})`));
+    const micro = Number(j.balance_micro_usd ?? 0);
+    return okv(`balance ${usd(micro)}`, {
+      accountId: String(j.account_id ?? ''),
+      balanceMicroUsd: micro,
+      balanceUsd: String(j.balance_usd ?? usd(micro)),
+    });
   },
 );
 
@@ -566,9 +658,23 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  const rails = [evmAccount && 'base', evmAccount && 'tempo', solanaSigner && 'solana'].filter(Boolean).join(', ') || 'none';
   // Stderr only — stdout is the MCP transport.
-  console.error(`gliana-ai MCP ready (${API}). generate rails: ${rails}${RAIL ? ` (using ${RAIL})` : ''}.`);
+  if (glianaKey()) {
+    // The key wins over any wallet (see paidFetch), so say which one will spend.
+    const also = [evmAccount && 'base/tempo', solanaSigner && 'solana'].filter(Boolean).join(', ');
+    console.error(
+      `gliana-ai MCP ready (${API}). Paying from the prepaid balance on GLIANA_API_KEY` +
+        `${also ? ` (wallet rails ${also} are configured but the key takes precedence — unset GLIANA_API_KEY to use them)` : ''}.`,
+    );
+  } else {
+    const rails = [evmAccount && 'base', evmAccount && 'tempo', solanaSigner && 'solana'].filter(Boolean).join(', ') || 'none';
+    console.error(
+      `gliana-ai MCP ready (${API}). generate rails: ${rails}${RAIL ? ` (using ${RAIL})` : ''}.` +
+        (rails === 'none'
+          ? ' No payment method configured — set GLIANA_API_KEY (prepaid, no wallet) or a wallet key to enable paid calls.'
+          : ''),
+    );
+  }
 }
 
 main().catch((err) => {

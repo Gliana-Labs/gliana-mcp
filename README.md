@@ -26,6 +26,7 @@ market-data and SEC-filing tools, with **no signup and no API key**. Paid calls 
 | `list_tools` | free | Every utility tool: price, HTTP method, example input, guidance. |
 | `tool` | mostly **paid** | Run one utility tool — scraping, screenshots, social cards, OCR, structured extraction, market data, chain RPC, reference data. |
 | `recipe` | **paid** | Run a multi-model pipeline in one call (e.g. text→image→video). |
+| `get_balance` | free | Prepaid balance left on your `gk_` key (only when one is configured). |
 
 `list_tools` reads the gateway live, so it is never out of date — which is why this
 table doesn't enumerate the utility tools. A written-down list goes stale the moment
@@ -62,16 +63,42 @@ Add to your MCP client config.
       "command": "npx",
       "args": ["-y", "gliana-ai-mcp"],
       "env": {
-        "GLIANA_WALLET_KEY_FILE": "/absolute/path/to/gliana-wallet.key"
+        "GLIANA_API_KEY": "gk_your_key"
       }
     }
   }
 }
 ```
 
-### Payment rails
+### Paying
 
-`generate` settles the gateway's 402 from your wallet. Pick a rail and set its key:
+Two ways. **Pick the first one unless you specifically want the second.**
+
+#### 1. Prepaid key — no wallet, no private key
+
+```json
+"env": { "GLIANA_API_KEY": "gk_your_key" }
+```
+
+Mint a key and top it up at [dashboard.glianalabs.com](https://dashboard.glianalabs.com)
+(card, or bank transfer / QRIS in rupiah). No signup is needed to *use* the
+gateway at all; the key only exists so a balance can be attached to it.
+
+Paid calls then return `200` directly — no 402 handshake, nothing signed, no
+chain, no gas, and nothing in your config that can spend more than you loaded.
+Each key carries a daily cap on top of its balance.
+
+`get_balance` (free) reports what is left, and every paid call appends the
+remaining balance to its result.
+
+#### 2. Your own wallet — pay per call from your own USDC
+
+The non-custodial route: the gateway's 402 is settled by a signature made on
+your machine. Nothing is held by us, and no account exists.
+
+The cost is that a **private key has to live in your MCP client's config**,
+which is a fair thing for a reviewer to refuse. If that is a problem, use the
+prepaid key above.
 
 > **Use a dedicated wallet, funded with only what you intend to spend.**
 > This server signs payments locally — the key never leaves your machine and is
@@ -98,8 +125,13 @@ Add to your MCP client config.
   `solana` if only a Solana key is set). The wallet must hold USDC on that chain.
 - `GLIANA_API_URL` — optional, defaults to `https://api.glianalabs.com`.
 
-Keys are needed only for paid calls. The discovery tools — and the free utility
-tools `list_tools` reports at `priceMicroUsd: 0` — work without any wallet.
+**If both are set, the prepaid key wins** and the server says so on startup.
+That matches the gateway's own rule — a `gk_` key is something you attached
+deliberately, so it should be what spends — and it means a leftover wallet key
+in your config cannot quietly become the thing paying.
+
+Neither is needed for the discovery tools or for the free utility tools that
+`list_tools` reports at `priceMicroUsd: 0`.
 
 Restart the client. Ask it to *"list GlianaAI models"* or *"generate an image of a
 red fox with nano-banana-2"*.
@@ -125,6 +157,9 @@ npx gliana-ai-mcp watch --tool token-price --input '{"symbol":"SOL"}' \
 # → {"t":"...","call":1,"costUsd":0.002,"spentUsd":0.002,"result":{...}}
 ```
 
+`watch` pays from a **wallet** (`--rail base` or `--rail solana`), not from a
+prepaid key — see "Why the x402 rail" below.
+
 `--budget <usd>` is **required** and is a hard stop — there is no default,
 because an unbounded spend loop is not something this command will do on your
 behalf. Before every poll it checks the budget against the *live* quote, so a
@@ -140,9 +175,13 @@ us. `--rail base` (default with `GLIANA_WALLET_KEY`) or `--rail solana`.
 
 ## Funding
 
-Fund the wallet with a few dollars of USDC on your chosen chain (Base, Tempo, or
-Solana). You pay only the per-call price (see `get_price`); there's no
-subscription and no balance held by us.
+With a **prepaid key**, top up at [dashboard.glianalabs.com](https://dashboard.glianalabs.com)
+and check what is left with `get_balance`.
+
+With a **wallet**, fund it with a few dollars of USDC on your chosen chain
+(Base, Tempo, or Solana).
+
+Either way you pay only the per-call price (see `get_price`) — no subscription.
 
 > Use a dedicated low-balance wallet for agents. Never paste your main wallet's
 > key into any config.
