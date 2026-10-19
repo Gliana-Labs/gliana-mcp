@@ -1,6 +1,6 @@
 {
   "name": "gliana-ai-mcp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "MCP server for GlianaAI — pay-per-call AI models, live market data, SEC filings and identity APIs. 90+ generative models (image, video, music, speech, LLM chat) plus crypto and FX rates, DEX liquidity, DeFi TVL, gas, US company fundamentals, SEC filings and insider trades, web search, OCR and face matching. No signup, no API key; each call settles as a USDC micropayment from your own wallet.",
   "type": "module",
   "bin": {
@@ -22,6 +22,10 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@solana/kit": "^6.9.0",
     "@solana/mpp": "^0.6.0",
+    "@x402/core": "^2.28.0",
+    "@x402/evm": "^2.28.0",
+    "@x402/fetch": "^2.28.0",
+    "@x402/svm": "^2.28.0",
     "bs58": "^6.0.0",
     "mppx": "^0.6.31",
     "viem": "^2.21.0",
@@ -29,9 +33,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
-    "@x402/evm": "^2.28.0",
-    "@x402/fetch": "^2.28.0",
-    "@x402/svm": "^2.28.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.12"
   },
