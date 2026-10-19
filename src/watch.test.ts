@@ -126,18 +126,39 @@ describe('the spend loop', () => {
     expect(paying).toHaveBeenCalledTimes(3);
   });
 
-  it('does not charge for a handler error, so a broken tool is free to re-poll', async () => {
+  it('stops dead on a 400 instead of re-sending a body already refused', async () => {
+    const restore = quiet();
+    // The first version re-sent a malformed input every tick, forever, free.
+    const paying = vi.fn(async () => json({ error: 'missing_input', detail: 'Required: { symbols }' }, 400));
+    const d = deps({ payingFetchImpl: paying as never });
+    const code = await runWatch(['--tool', 'token-price', '--budget', '10'], d);
+    restore();
+    expect(code).toBe(2);
+    expect(paying).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not charge for a handler error', async () => {
     const restore = quiet();
     const paying = vi
       .fn()
-      .mockResolvedValueOnce(json({ error: 'bad_request' }, 400))
+      .mockResolvedValueOnce(json({ error: 'upstream' }, 503))
       .mockResolvedValue(json({ price: 1 }));
     const d = deps({ payingFetchImpl: paying as never });
     await runWatch(['--tool', 'token-price', '--budget', '0.004'], d);
     restore();
-    // The 400 settles nothing on this gateway, so the budget still bought two
-    // paid calls after it: 1 free failure + 2 charged = 3 attempts.
+    // A 503 settles nothing, so the budget still bought two paid calls after
+    // it: 1 free failure + 2 charged = 3 attempts.
     expect(paying).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up after 5 transient failures with nothing succeeding, rather than spinning', async () => {
+    const restore = quiet();
+    const paying = vi.fn(async () => json({ error: 'upstream' }, 503));
+    const d = deps({ payingFetchImpl: paying as never });
+    const code = await runWatch(['--tool', 'token-price', '--budget', '10'], d);
+    restore();
+    expect(code).toBe(1);
+    expect(paying).toHaveBeenCalledTimes(5);
   });
 
   it('bails out instead of spinning when the wallet is unfunded (402 after paying)', async () => {

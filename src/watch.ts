@@ -157,6 +157,32 @@ function buildPayingFetch(deps: WatchDeps, rail: string) {
   return wrapFetchWithPayment(fetch, client);
 }
 
+/**
+ * Statuses that mean "this request is wrong", not "try again later".
+ *
+ * Re-sending a body the gateway already refused costs nothing (its guards run
+ * before the charge) but it will never succeed, so the loop stops and says so
+ * rather than printing the same rejection every tick. 408 and 429 are timing,
+ * not correctness; 402 is handled separately as an unfunded wallet.
+ */
+const isPermanent = (status: number) => status >= 400 && status < 500 && status !== 402 && status !== 408 && status !== 429;
+
+/** How many transient failures in a row before giving up on a run. */
+const MAX_TRANSIENT_FAILURES = 5;
+
+/** The tool's own published example body, used to make a 400 self-explanatory. */
+async function exampleFor(api: string, tool: string, doFetch: typeof globalThis.fetch): Promise<string | null> {
+  try {
+    const r = await doFetch(`${api}/v1/tools`, { headers: { accept: 'application/json' } });
+    if (!r.ok) return null;
+    const { tools = [] } = (await r.json()) as { tools?: Array<{ name?: string; example?: unknown }> };
+    const hit = tools.find((x) => x.name === tool);
+    return hit?.example ? JSON.stringify(hit.example) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Tools worth polling: cheap enough that a loop is sane, and not browser/AI-heavy. */
 const POLLABLE_CATEGORIES = new Set(['market', 'osint', 'security']);
 const POLLABLE_MAX_MICRO = 10_000; // $0.01
@@ -321,9 +347,26 @@ export async function runWatch(argv: string[], deps: WatchDeps): Promise<number>
       }
       if (!res.ok) {
         // A 4xx/5xx from the handler: on this gateway the middleware only
-        // settles below 400, so nothing moved. Free to try again next tick.
+        // settles below 400, so nothing moved. Free to try again next tick —
+        // but only if trying again could plausibly work.
         failures++;
-        console.error(`${t} HTTP ${res.status} (no charge): ${(await res.text().catch(() => '')).slice(0, 160)}`);
+        const detail = (await res.text().catch(() => '')).slice(0, 200);
+        if (isPermanent(res.status)) {
+          // A rejected INPUT will be rejected identically forever. The first
+          // version of this loop re-sent a malformed body every tick until
+          // someone noticed and hit Ctrl-C: free, but useless, and it buried
+          // the one line that said what was wrong.
+          console.error(`${t} HTTP ${res.status} (no charge): ${detail}`);
+          const hint = await exampleFor(deps.api, parsed.tool!, doFetch);
+          if (hint) console.error(`\nThe published example body for ${parsed.tool} is:\n  --input '${hint}'`);
+          summary(`Stopped on a permanent HTTP ${res.status} — the request will not start working on its own`);
+          return 2;
+        }
+        console.error(`${t} HTTP ${res.status} (no charge, retrying): ${detail}`);
+        if (failures - calls >= MAX_TRANSIENT_FAILURES) {
+          summary(`Stopped after ${MAX_TRANSIENT_FAILURES} failures with nothing succeeding`);
+          return 1;
+        }
       } else {
         calls++;
         spentMicro += quote.micro;
