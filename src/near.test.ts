@@ -10,6 +10,10 @@ import {
   payWithNear,
   deriveEvmAddress,
   SIGNER_CONTRACT,
+  rsvFromMpc,
+  signArgs,
+  SIGN_GAS,
+  SIGN_DEPOSIT,
   type Accept,
 } from './near.ts';
 
@@ -263,5 +267,55 @@ describe('deriveEvmAddress', () => {
   it('names the right signer contract per network', () => {
     expect(SIGNER_CONTRACT.mainnet).toBe('v1.signer');
     expect(SIGNER_CONTRACT.testnet).toBe('v1.signer-prod.testnet');
+  });
+});
+
+describe('rsvFromMpc — against a real v1.signer reply', () => {
+  /**
+   * Captured verbatim from v1.signer-prod.testnet on 2026-10-20, signing the
+   * EIP-712 digest of a real $0.002 token-price challenge as
+   * gliana-x402.testnet on path "gliana-x402". The MPC call took 15.2s.
+   *
+   * This fixture is the end-to-end proof: the signature the MPC produced
+   * recovers to the very address deriveEvmAddress computes offline. If either
+   * half ever drifts, this fails.
+   */
+  const MPC = {
+    scheme: 'Secp256k1',
+    big_r: { affine_point: '03e09c880963b5cd2153642f6f10301aec9a1bceb0783b6f33fe9d7e74b5740c95' },
+    s: { scalar: '141d56e2d36a97f9c675a841b44695c7966c937d2f09f1d87f4bcbec774a51d6' },
+    recovery_id: 0,
+  };
+  const DIGEST = '0xd53967c2206eed8332557328bf85739de29d9bafcac5917e96190a8fc57f07f8' as const;
+
+  it('recovers to the address derived offline for that account and path', async () => {
+    const { recoverAddress } = await import('viem');
+    const recovered = await recoverAddress({ hash: DIGEST, signature: toSignature(rsvFromMpc(MPC)) });
+    expect(recovered).toBe(await deriveEvmAddress('gliana-x402.testnet', 'gliana-x402', 'testnet'));
+  });
+
+  it('drops the compressed-point prefix — r is x, not the whole 33 bytes', () => {
+    const { r } = rsvFromMpc(MPC);
+    expect(r).toBe('0xe09c880963b5cd2153642f6f10301aec9a1bceb0783b6f33fe9d7e74b5740c95');
+    expect(r).toHaveLength(66);
+  });
+
+  it('keeping the prefix byte recovers a DIFFERENT address — the trap', async () => {
+    const { recoverAddress } = await import('viem');
+    const wrong = toSignature({ r: `0x${MPC.big_r.affine_point.slice(0, 64)}`, s: `0x${MPC.s.scalar}`, v: 0 });
+    const got = await recoverAddress({ hash: DIGEST, signature: wrong }).catch(() => '0xfailed');
+    expect(got).not.toBe(await deriveEvmAddress('gliana-x402.testnet', 'gliana-x402', 'testnet'));
+  });
+
+  it('builds sign args on the secp256k1 domain, unprefixed', () => {
+    const a = signArgs(DIGEST, 'gliana-x402');
+    expect(a.request.payload_v2.Ecdsa).toBe(DIGEST.slice(2));
+    expect(a.request.domain_id).toBe(0);
+    expect(a.request.path).toBe('gliana-x402');
+  });
+
+  it('attaches the max gas a call may carry', () => {
+    expect(SIGN_GAS).toBe(300_000_000_000_000n);
+    expect(SIGN_DEPOSIT).toBe(1n);
   });
 });

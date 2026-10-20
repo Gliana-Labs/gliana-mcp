@@ -361,3 +361,57 @@ interface PointLike {
 function bytesToHex(b: Uint8Array): string {
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
+
+/* ───────────────────────── the v1.signer response ─────────────────────────
+ *
+ * What the MPC contract returns, and how it becomes an {r,s,v}.
+ *
+ * Measured against v1.signer-prod.testnet on 2026-10-20: a sign call takes
+ * about 15 SECONDS end to end. That is fine for an x402 authorization, whose
+ * window is 900s, but it is not interactive — a caller should say what it is
+ * waiting for rather than appear hung.
+ */
+
+/** The shape v1.signer returns for an Ecdsa request. */
+export interface MpcSignature {
+  scheme?: string;
+  big_r: { affine_point: string };
+  s: { scalar: string };
+  recovery_id: number;
+}
+
+/**
+ * v1.signer's reply -> the {r,s,v} that `toSignature` turns into 65 bytes.
+ *
+ * `big_r.affine_point` is a COMPRESSED SEC1 point: a 02/03 parity prefix and
+ * then x. ECDSA's r IS that x coordinate, so the prefix byte is dropped. Using
+ * the whole 33-byte string shifts every later byte and recovers a different
+ * address — a failure that looks exactly like signing with the wrong key.
+ *
+ * Verified: with this conversion, a real v1.signer signature recovers to the
+ * same address `deriveEvmAddress` computes offline for that account and path.
+ */
+export function rsvFromMpc(sig: MpcSignature): Rsv {
+  return {
+    r: `0x${sig.big_r.affine_point.slice(2)}` as Hex,
+    s: `0x${sig.s.scalar}` as Hex,
+    v: sig.recovery_id,
+  };
+}
+
+/** The arguments a `sign` call takes, for a caller wiring up its own account. */
+export function signArgs(digest: Hex, path: string) {
+  return {
+    request: {
+      payload_v2: { Ecdsa: digest.replace(/^0x/, '') },
+      path,
+      // 0 = the secp256k1 domain. Eddsa would be 1, and is not what EIP-3009
+      // verifies against.
+      domain_id: 0,
+    },
+  };
+}
+
+/** 300 TGas, the maximum a single call may attach, plus a 1 yocto deposit. */
+export const SIGN_GAS = 300_000_000_000_000n;
+export const SIGN_DEPOSIT = 1n;
