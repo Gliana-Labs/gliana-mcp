@@ -8,6 +8,8 @@ import {
   paymentHeader,
   randomNonce,
   payWithNear,
+  deriveEvmAddress,
+  SIGNER_CONTRACT,
   type Accept,
 } from './near.ts';
 
@@ -211,5 +213,55 @@ describe('payWithNear', () => {
     );
     const r = await payWithNear({ url: 'https://api.test/x', from: FROM, sign: async () => sig, fetchImpl: f as never });
     expect(r.digest).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+});
+
+describe('deriveEvmAddress', () => {
+  /**
+   * Checked against chainsig.js's own deriveChildPublicKey on 2026-10-20.
+   * These three addresses came out of the official SDK; this package computes
+   * them with @noble alone, avoiding chainsig.js's bitcoin/cosmos/sui/xrpl/
+   * aptos/solana bundle. If a refactor breaks the derivation, it breaks here
+   * rather than by sending money to an address nobody controls.
+   */
+  it.each([
+    ['example.near', 'ethereum-1', '0xEF4Ea05e5c11057DeCC8E1bd6F5369f2acD91fA5'],
+    ['example.near', 'ethereum-2', '0x273EeB4d7651d9296ec5bD9A6cEeBCa219101cb8'],
+    ['glianalabs.near', 'gliana-x402', '0xf0dA966094f7FB5a0De3348657620019c2e477d4'],
+  ])('matches chainsig.js for %s on path %s', async (acct, path, want) => {
+    expect(await deriveEvmAddress(acct, path, 'mainnet')).toBe(want);
+  });
+
+  it('is deterministic — the same inputs always give the same address', async () => {
+    const a = await deriveEvmAddress('glianalabs.near', 'gliana-x402');
+    const b = await deriveEvmAddress('glianalabs.near', 'gliana-x402');
+    expect(a).toBe(b);
+  });
+
+  it('gives a DIFFERENT address per path, which is why a path must not drift', async () => {
+    const a = await deriveEvmAddress('glianalabs.near', 'gliana-x402');
+    const b = await deriveEvmAddress('glianalabs.near', 'gliana-x402-v2');
+    expect(a).not.toBe(b);
+  });
+
+  it('gives a different address per account', async () => {
+    expect(await deriveEvmAddress('a.near', 'p')).not.toBe(await deriveEvmAddress('b.near', 'p'));
+  });
+
+  it('separates mainnet and testnet — different MPC root keys', async () => {
+    const m = await deriveEvmAddress('example.near', 'ethereum-1', 'mainnet');
+    const t = await deriveEvmAddress('example.near', 'ethereum-1', 'testnet');
+    expect(m).not.toBe(t);
+  });
+
+  it('returns a checksummed address', async () => {
+    const a = await deriveEvmAddress('example.near', 'ethereum-1');
+    expect(a).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(a).not.toBe(a.toLowerCase()); // EIP-55 mixed case
+  });
+
+  it('names the right signer contract per network', () => {
+    expect(SIGNER_CONTRACT.mainnet).toBe('v1.signer');
+    expect(SIGNER_CONTRACT.testnet).toBe('v1.signer-prod.testnet');
   });
 });

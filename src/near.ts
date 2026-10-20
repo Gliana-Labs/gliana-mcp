@@ -267,3 +267,97 @@ export async function payWithNear(opts: {
     digest,
   };
 }
+
+/* ───────────────────────── address derivation ─────────────────────────
+ *
+ * Which EVM address does a NEAR account control?
+ *
+ * Chain Signatures derives it deterministically and OFFLINE: the MPC network
+ * publishes one root public key, and each (account, path) pair shifts it by a
+ * scalar derived from those two strings. No RPC, no gas, no account needed —
+ * so a caller can know its own address, and anyone can check it, before any
+ * money moves.
+ *
+ *   epsilon      = sha3_256("near-mpc-recovery v0.1.0 epsilon derivation:" +
+ *                           accountId + "," + path)
+ *   P_child      = P_root + epsilon·G
+ *   address      = last 20 bytes of keccak256(P_child without its 0x04 tag)
+ *
+ * Implemented here rather than by importing chainsig.js, whose published
+ * bundle also drags in bitcoinjs-lib, the @cosmjs suite, @mysten/sui, xrpl,
+ * the Aptos SDK and @solana/web3.js — tens of megabytes of chains this
+ * package never touches, inside an MCP server people install with npx. The
+ * two primitives needed are declared dependencies and the result is checked
+ * against chainsig.js's own output in the tests.
+ *
+ * Note sha3_256, NOT keccak256: they differ only in padding, which makes a
+ * wrong one silently produce a valid-looking address for a key nobody holds.
+ */
+
+/** MPC root public keys, SEC1 uncompressed. From chainsig.js constants. */
+const ROOT_PUBLIC_KEY_NAJ = {
+  mainnet: 'secp256k1:3tFRbMqmoa6AAALMrEFAYCEoHcqKxeW38YptwowBVBtXK1vo36HDbUWuR6EZmoK4JcH6HDkNMGGqP1ouV7VZUWya',
+  testnet: 'secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8fGBiJB8TBtFMP5WWXz6B89Ac1fbpzPwAvoyQebemHFwx3',
+} as const;
+
+/** The signer contract, for the caller that has to name it in a function call. */
+export const SIGNER_CONTRACT = {
+  mainnet: 'v1.signer',
+  testnet: 'v1.signer-prod.testnet',
+} as const;
+
+export type NearNetwork = keyof typeof ROOT_PUBLIC_KEY_NAJ;
+
+/**
+ * The EVM address a NEAR account controls on a given path.
+ *
+ * The path is a plain string and any value works, so one account has an
+ * unlimited supply of addresses. Reuse the SAME path to reuse an address —
+ * changing it silently produces a different, unfunded one.
+ */
+export async function deriveEvmAddress(
+  accountId: string,
+  path: string,
+  network: NearNetwork = 'mainnet',
+): Promise<Hex> {
+  const [{ sha3_256 }, { secp256k1 }, { base58 }, { getAddress, keccak256 }] = await Promise.all([
+    import('@noble/hashes/sha3.js'),
+    import('@noble/curves/secp256k1.js'),
+    import('@scure/base'),
+    import('viem'),
+  ]);
+
+  // najToUncompressedPubKeySEC1: drop the "secp256k1:" prefix, base58-decode
+  // the 64-byte x||y, and re-tag it as an uncompressed SEC1 point.
+  const raw = base58.decode(ROOT_PUBLIC_KEY_NAJ[network].split(':')[1]);
+  // @noble/curves renamed ProjectivePoint -> Point in 2.x. Reading only one
+  // name throws "cannot read properties of undefined" on the other major,
+  // which reads like a broken install rather than a version difference.
+  const c = secp256k1 as unknown as { Point?: PointCtor; ProjectivePoint?: PointCtor };
+  const Point = c.Point ?? c.ProjectivePoint;
+  if (!Point) throw new Error('@noble/curves exposes neither Point nor ProjectivePoint on secp256k1.');
+  const root = Point.fromHex(`04${bytesToHex(raw)}`);
+
+  const epsilon = BigInt(`0x${bytesToHex(sha3_256(`near-mpc-recovery v0.1.0 epsilon derivation:${accountId},${path}`))}`);
+  const child = root.add(Point.BASE.multiply(epsilon));
+
+  // keccak256 of x||y — the 0x04 tag is NOT part of the hashed input.
+  // toHex(false) = uncompressed, i.e. 04||x||y. Drop the 04 tag before
+  // hashing: it is a SEC1 encoding marker, not part of the key material.
+  const xy = child.toHex(false).slice(2);
+  return getAddress(`0x${keccak256(`0x${xy}`).slice(-40)}`) as Hex;
+}
+
+interface PointCtor {
+  fromHex(hex: string): PointLike;
+  BASE: PointLike;
+}
+interface PointLike {
+  add(other: PointLike): PointLike;
+  multiply(n: bigint): PointLike;
+  toHex(compressed: boolean): string;
+}
+
+function bytesToHex(b: Uint8Array): string {
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
