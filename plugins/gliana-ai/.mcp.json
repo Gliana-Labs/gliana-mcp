@@ -1,7 +1,7 @@
 {
   "gliana-ai": {
     "command": "npx",
-    "args": ["-y", "gliana-ai-mcp@^0.8.1"],
+    "args": ["-y", "gliana-ai-mcp@^0.8.2"],
     "env": {
       "GLIANA_API_KEY": "${GLIANA_API_KEY:-}",
       "GLIANA_WALLET_KEY_FILE": "${GLIANA_WALLET_KEY_FILE:-}",

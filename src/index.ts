@@ -20,12 +20,13 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Mppx, evm, tempo } from 'mppx/client';
+import { Mppx, tempo } from 'mppx/client';
 import { solana } from '@solana/mpp/client';
 import { readFileSync } from 'node:fs';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createKeyPairSignerFromBytes, createKeyPairSignerFromPrivateKeyBytes } from '@solana/kit';
 import bs58 from 'bs58';
+import { baseMethod } from './rails.js';
 import { CapRefusal, SpendLedger, capOnChallenge, capsFromEnv, priceFromWwwAuthenticate, refusal } from './spend.js';
 import { z } from 'zod';
 
@@ -124,7 +125,7 @@ function resolveRail(): { rail: string; method: unknown } | { error: string } {
     };
   if (rail === 'base') {
     if (!evmAccount) return { error: 'GLIANA_RAIL=base needs GLIANA_WALLET_KEY (a 0x key holding USDC on Base).' };
-    return { rail, method: evm({ account: evmAccount }) };
+    return { rail, method: baseMethod(evmAccount) };
   }
   if (rail === 'tempo') {
     if (!evmAccount) return { error: 'GLIANA_RAIL=tempo needs GLIANA_WALLET_KEY (a 0x key holding USDC on Tempo).' };

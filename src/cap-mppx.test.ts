@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { Mppx, evm, tempo } from 'mppx/client';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it, vi } from 'vitest';
+import { baseMethod } from './rails.js';
 import { CapRefusal, capOnChallenge, capsFromEnv } from './spend.js';
 
 const recorded = readFileSync(new URL('./fixtures/challenge-402.txt', import.meta.url), 'utf8').trim();
@@ -37,7 +38,7 @@ function fakeGateway() {
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch };
 }
 
-for (const [name, method] of [['evm (Base)', evm({ account })], ['tempo', tempo({ account })]] as const) {
+for (const [name, method] of [['evm (Base)', baseMethod(account)], ['tempo', tempo({ account })]] as const) {
   describe(`wallet cap through real mppx — ${name}`, () => {
     it('over the cap: rejects with CapRefusal and sends no payment', async () => {
       const gw = fakeGateway();
@@ -70,5 +71,30 @@ describe('capOnChallenge under the cap', () => {
     const createCredential = vi.fn(async () => 'cred');
     const fn = capOnChallenge(capsFromEnv({}), () => 0, () => {});
     await expect(fn({ request: { amount: '99000000' } }, { createCredential })).resolves.toBe('cred');
+  });
+});
+
+describe('Base rail as the server builds it', () => {
+  it('under the cap: signs and sends the payment (2nd request carries a credential)', async () => {
+    const gw = fakeGateway();
+    const quoted: number[] = [];
+    const mppx = Mppx.create({
+      methods: [baseMethod(account)] as never,
+      polyfill: false,
+      fetch: gw.fetch,
+      onChallenge: capOnChallenge(capsFromEnv({ GLIANA_MAX_PER_CALL_USD: '1' }), () => 0, (m) => quoted.push(m)) as never,
+    });
+    const res = await mppx.fetch('https://api.glianalabs.com/v1/infer', { method: 'POST', body: '{}' });
+    expect(res.status).toBe(200);
+    expect(gw.calls).toEqual([{ paid: false }, { paid: true }]);
+    expect(quoted).toEqual([46_800]);
+  });
+
+  it('bare evm({ account }) cannot pay this gateway — the bug 0.8.2 fixed', async () => {
+    const gw = fakeGateway();
+    const mppx = Mppx.create({ methods: [evm({ account })] as never, polyfill: false, fetch: gw.fetch });
+    await expect(mppx.fetch('https://api.glianalabs.com/v1/infer', { method: 'POST', body: '{}' })).rejects.toThrow(
+      /token name and version/,
+    );
   });
 });
