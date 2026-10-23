@@ -13,7 +13,15 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it, vi } from 'vitest';
 import { CapRefusal, capOnChallenge, capsFromEnv } from './spend.js';
 
-const header = readFileSync(new URL('./fixtures/challenge-402.txt', import.meta.url), 'utf8').trim();
+const recorded = readFileSync(new URL('./fixtures/challenge-402.txt', import.meta.url), 'utf8').trim();
+/**
+ * A live challenge expires within minutes and mppx checks `expires` BEFORE
+ * onChallenge, so a recorded one goes stale and every case would fail on
+ * PaymentExpiredError instead of testing the cap. The client never verifies the
+ * challenge id's HMAC (only the server does), so moving `expires` forward keeps
+ * the rest of the recorded challenge — price, currency, chain — real.
+ */
+const fresh = () => recorded.replace(/expires="[^"]*"/g, `expires="${new Date(Date.now() + 3_600_000).toISOString()}"`);
 const account = privateKeyToAccount(generatePrivateKey());
 
 function fakeGateway() {
@@ -24,7 +32,7 @@ function fakeGateway() {
     calls.push({ paid });
     return paid
       ? new Response('{"ok":true}', { status: 200 })
-      : new Response('{"error":"payment_required"}', { status: 402, headers: { 'www-authenticate': header } });
+      : new Response('{"error":"payment_required"}', { status: 402, headers: { 'www-authenticate': fresh() } });
   });
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch };
 }
