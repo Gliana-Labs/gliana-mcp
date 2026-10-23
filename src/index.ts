@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createKeyPairSignerFromBytes, createKeyPairSignerFromPrivateKeyBytes } from '@solana/kit';
 import bs58 from 'bs58';
-import { SpendLedger, capsFromEnv, challengeMicro, priceFromWwwAuthenticate, refusal } from './spend.js';
+import { CapRefusal, SpendLedger, capOnChallenge, capsFromEnv, priceFromWwwAuthenticate, refusal } from './spend.js';
 import { z } from 'zod';
 
 const API = (process.env.GLIANA_API_URL ?? 'https://api.glianalabs.com').replace(/\/+$/, '');
@@ -183,7 +183,6 @@ async function paidFetch(path: string, body: string): Promise<{ rail: string; re
   }
   const picked = resolveRail();
   if ('error' in picked) return { error: picked.error };
-  let refused: string | null = null;
   let quoted = 0;
   // Fresh client per attempt so a stale 402 challenge is never reused.
   const mppx = Mppx.create({
@@ -191,25 +190,15 @@ async function paidFetch(path: string, body: string): Promise<{ rail: string; re
     polyfill: false,
     // The challenge carries the exact price, and this runs before anything is
     // signed — the one point where a wallet payment can still be stopped free.
-    onChallenge: async (challenge, { createCredential }) => {
-      const micro = challengeMicro(challenge.request as Record<string, unknown>);
-      if (capped) {
-        if (micro === null) refused = 'Not paid: could not read the price to check it against your spending caps.';
-        else refused = refusal(micro, CAPS, ledger.spentToday());
-        if (refused) return undefined;
-      }
-      quoted = micro ?? 0;
-      return createCredential();
-    },
+    onChallenge: capOnChallenge(CAPS, () => ledger.spentToday(), (micro) => (quoted = micro)) as never,
   });
   let res: Response;
   try {
     res = await mppx.fetch(url, { method: 'POST', headers, body });
   } catch (err) {
-    if (refused) return { error: refused };
+    if (err instanceof CapRefusal) return { error: err.message };
     throw err;
   }
-  if (refused) return { error: refused };
   if (res.ok && capped) ledger.record(quoted);
   return { rail: picked.rail, res };
 }

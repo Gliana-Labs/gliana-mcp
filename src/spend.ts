@@ -102,3 +102,29 @@ export function refusal(micro: number, caps: Caps, spentToday: number): string |
   }
   return null;
 }
+
+/** Thrown to abort a payment. Carries the message the caller is shown. */
+export class CapRefusal extends Error {}
+
+/**
+ * An mppx `onChallenge` that enforces the caps on a wallet rail.
+ *
+ * It THROWS to refuse. Returning `undefined` does not stop mppx: its fetch does
+ * `onChallengeCredential ?? (await createCredential())`, so an undefined return
+ * falls through to the default and signs the payment anyway (true in 0.6.31 and
+ * 0.15.0). 0.8.0 returned undefined here, which paid over-cap calls on wallet
+ * rails and then reported "Not paid". A throw rejects mppx.fetch before any
+ * credential exists.
+ */
+export function capOnChallenge(caps: Caps, spentToday: () => number, onQuoted: (micro: number) => void) {
+  return async (challenge: { request: unknown }, { createCredential }: { createCredential: () => Promise<string> }) => {
+    const micro = challengeMicro(challenge.request as Record<string, unknown>);
+    if (caps.perCallMicro !== null || caps.perDayMicro !== null) {
+      if (micro === null) throw new CapRefusal('Not paid: could not read the price to check it against your spending caps.');
+      const why = refusal(micro, caps, spentToday());
+      if (why) throw new CapRefusal(why);
+    }
+    onQuoted(micro ?? 0);
+    return createCredential();
+  };
+}

@@ -1,10 +1,20 @@
 {
   "name": "gliana-ai",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "120+ pay-per-call AI models and data tools in Claude Code. No signup; spending caps checked before every payment.",
-  "author": { "name": "Gliana Labs", "url": "https://glianalabs.com" },
+  "author": {
+    "name": "Gliana Labs",
+    "url": "https://glianalabs.com"
+  },
   "homepage": "https://ai.glianalabs.com",
   "repository": "https://github.com/Gliana-Labs/gliana-mcp",
   "license": "MIT",
-  "keywords": ["ai", "image-generation", "video-generation", "llm", "x402", "mpp"]
+  "keywords": [
+    "ai",
+    "image-generation",
+    "video-generation",
+    "llm",
+    "x402",
+    "mpp"
+  ]
 }
