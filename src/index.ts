@@ -15,6 +15,8 @@
  *   GLIANA_RAIL        base | tempo | solana — which rail to pay with (default: base,
  *                      else solana). Fund the wallet on the matching chain.
  *   GLIANA_API_URL     defaults to https://api.glianalabs.com.
+ *   GLIANA_MAX_PER_CALL_USD / GLIANA_MAX_PER_DAY_USD  optional spending caps, checked
+ *                      against the exact 402 price BEFORE paying (see spend.ts).
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -24,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createKeyPairSignerFromBytes, createKeyPairSignerFromPrivateKeyBytes } from '@solana/kit';
 import bs58 from 'bs58';
+import { SpendLedger, capsFromEnv, challengeMicro, priceFromWwwAuthenticate, refusal } from './spend.js';
 import { z } from 'zod';
 
 const API = (process.env.GLIANA_API_URL ?? 'https://api.glianalabs.com').replace(/\/+$/, '');
@@ -152,21 +155,63 @@ const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(6).replace(/0+$/,
  * The balance rail cannot double-charge this way, but the rule is kept uniform
  * so no call site has to know which rail it got.
  */
+const CAPS = capsFromEnv(process.env);
+const ledger = new SpendLedger();
+const capped = CAPS.perCallMicro !== null || CAPS.perDayMicro !== null;
+
 async function paidFetch(path: string, body: string): Promise<{ rail: string; res: Response } | { error: string }> {
+  const url = `${API}${path}`;
+  const headers = { 'content-type': 'application/json' };
   const key = glianaKey();
   if (key) {
-    const res = await fetch(`${API}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body,
-    });
+    let quoted: number | null = null;
+    if (capped) {
+      // The balance rail answers 200 with no 402, so the price is never seen
+      // before the charge. An unpaid request is free and returns the exact
+      // challenge the gateway would bill (same priceForRequest), so ask that
+      // first. A 4xx here is the pre-charge guard speaking — hand it back as is.
+      const probe = await fetch(url, { method: 'POST', headers, body });
+      if (probe.status !== 402) return { rail: 'balance', res: probe };
+      quoted = priceFromWwwAuthenticate(probe.headers.get('www-authenticate'));
+      if (quoted === null) return { error: 'Not paid: could not read the price to check it against your spending caps.' };
+      const why = refusal(quoted, CAPS, ledger.spentToday());
+      if (why) return { error: why };
+    }
+    const res = await fetch(url, { method: 'POST', headers: { ...headers, authorization: `Bearer ${key}` }, body });
+    if (res.ok && capped) ledger.record(Number(res.headers.get('x-gliana-charged-micro-usd')) || quoted || 0);
     return { rail: 'balance', res };
   }
   const picked = resolveRail();
   if ('error' in picked) return { error: picked.error };
+  let refused: string | null = null;
+  let quoted = 0;
   // Fresh client per attempt so a stale 402 challenge is never reused.
-  const mppx = Mppx.create({ methods: [picked.method] as never, polyfill: false });
-  return { rail: picked.rail, res: await mppx.fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body }) };
+  const mppx = Mppx.create({
+    methods: [picked.method] as never,
+    polyfill: false,
+    // The challenge carries the exact price, and this runs before anything is
+    // signed — the one point where a wallet payment can still be stopped free.
+    onChallenge: async (challenge, { createCredential }) => {
+      const micro = challengeMicro(challenge.request as Record<string, unknown>);
+      if (capped) {
+        if (micro === null) refused = 'Not paid: could not read the price to check it against your spending caps.';
+        else refused = refusal(micro, CAPS, ledger.spentToday());
+        if (refused) return undefined;
+      }
+      quoted = micro ?? 0;
+      return createCredential();
+    },
+  });
+  let res: Response;
+  try {
+    res = await mppx.fetch(url, { method: 'POST', headers, body });
+  } catch (err) {
+    if (refused) return { error: refused };
+    throw err;
+  }
+  if (refused) return { error: refused };
+  if (res.ok && capped) ledger.record(quoted);
+  return { rail: picked.rail, res };
 }
 
 /**

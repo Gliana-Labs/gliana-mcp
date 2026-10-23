@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "glianalabs",
+  "owner": { "name": "Gliana Labs", "email": "contact@glianalabs.com" },
+  "metadata": {
+    "description": "GlianaAI for Claude Code: 120+ pay-per-call AI models and data tools, no signup."
+  },
+  "plugins": [
+    {
+      "name": "gliana-ai",
+      "source": "./plugins/gliana-ai",
+      "description": "Generate images, video, music and speech, call 30+ LLMs, and run data tools (OCR, SEC filings, market data, Indonesian reference data) from Claude Code. Pay per call from a prepaid gk_ key or your own wallet, with spending caps checked before every payment.",
+      "category": "ai",
+      "homepage": "https://ai.glianalabs.com",
+      "keywords": ["ai", "image-generation", "video-generation", "llm", "x402", "mpp", "pay-per-call"]
+    }
+  ]
+}

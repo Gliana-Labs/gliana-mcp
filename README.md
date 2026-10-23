@@ -52,9 +52,30 @@ Pass the returned `url` into the model field. Max 40 MB; video / image / audio o
 
 ## Install
 
-Add to your MCP client config.
+**Claude Code** — install the plugin (bundles this server plus a skill that tells
+Claude when and how to use it):
 
-**Claude Desktop** (`claude_desktop_config.json`) / **Cursor** (`~/.cursor/mcp.json`):
+```
+/plugin install gliana-ai --marketplace Gliana-Labs/gliana-mcp
+```
+
+Then set `GLIANA_API_KEY` in your shell (see *Paying* below) and restart Claude
+Code. The plugin ships with spending caps of $1 per call and $10 per day; override
+them with `GLIANA_MAX_PER_CALL_USD` / `GLIANA_MAX_PER_DAY_USD`.
+
+**Cursor** — one click: [Add GlianaAI to Cursor](cursor://anysphere.cursor-deeplink/mcp/install?name=gliana-ai&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImdsaWFuYS1haS1tY3AiXSwiZW52Ijp7IkdMSUFOQV9BUElfS0VZIjoiZ2tfeW91cl9rZXkiLCJHTElBTkFfTUFYX1BFUl9DQUxMX1VTRCI6IjEiLCJHTElBTkFfTUFYX1BFUl9EQVlfVVNEIjoiMTAifX0=),
+then replace `gk_your_key` in `~/.cursor/mcp.json`.
+
+**Codex** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.gliana-ai]
+command = "npx"
+args = ["-y", "gliana-ai-mcp"]
+env = { GLIANA_API_KEY = "gk_your_key", GLIANA_MAX_PER_CALL_USD = "1", GLIANA_MAX_PER_DAY_USD = "10" }
+```
+
+**Claude Desktop** (`claude_desktop_config.json`) and any other MCP client:
 
 ```json
 {
@@ -63,7 +84,9 @@ Add to your MCP client config.
       "command": "npx",
       "args": ["-y", "gliana-ai-mcp"],
       "env": {
-        "GLIANA_API_KEY": "gk_your_key"
+        "GLIANA_API_KEY": "gk_your_key",
+        "GLIANA_MAX_PER_CALL_USD": "1",
+        "GLIANA_MAX_PER_DAY_USD": "10"
       }
     }
   }
@@ -137,6 +160,23 @@ in your config cannot quietly become the thing paying.
 
 Neither is needed for the discovery tools or for the free utility tools that
 `list_tools` reports at `priceMicroUsd: 0`.
+
+### Spending caps
+
+```json
+"env": { "GLIANA_MAX_PER_CALL_USD": "1", "GLIANA_MAX_PER_DAY_USD": "10" }
+```
+
+Both optional. When set, every paid call is priced **before** anything is paid —
+from the gateway's own 402 quote, the same number it would bill — and refused if
+it would exceed either cap. A refusal costs nothing and says which cap it hit.
+
+- Works on every rail. On a wallet rail the check runs on the 402 challenge
+  before it is signed; on the prepaid key it costs one extra free request.
+- The day total is kept in `~/.gliana-ai-mcp/spend.json`, so restarting the
+  client does not reset it. The prepaid key also has its own server-side daily cap.
+- An agent in a loop, or one talked into a 30-second 1080p video, is exactly what
+  these are for. With a wallet rail there is otherwise no ceiling but the balance.
 
 Restart the client. Ask it to *"list GlianaAI models"* or *"generate an image of a
 red fox with nano-banana-2"*.

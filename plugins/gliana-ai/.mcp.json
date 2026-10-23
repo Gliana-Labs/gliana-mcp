@@ -1,0 +1,14 @@
+{
+  "gliana-ai": {
+    "command": "npx",
+    "args": ["-y", "gliana-ai-mcp@^0.8.0"],
+    "env": {
+      "GLIANA_API_KEY": "${GLIANA_API_KEY:-}",
+      "GLIANA_WALLET_KEY_FILE": "${GLIANA_WALLET_KEY_FILE:-}",
+      "GLIANA_SOLANA_KEY_FILE": "${GLIANA_SOLANA_KEY_FILE:-}",
+      "GLIANA_RAIL": "${GLIANA_RAIL:-}",
+      "GLIANA_MAX_PER_CALL_USD": "${GLIANA_MAX_PER_CALL_USD:-1}",
+      "GLIANA_MAX_PER_DAY_USD": "${GLIANA_MAX_PER_DAY_USD:-10}"
+    }
+  }
+}
