@@ -470,40 +470,47 @@ server.registerTool(
   'list_tools',
   {
     description:
-      'List every GlianaAI utility tool (name, HTTP method, per-call price, an example input, and usage guidance), read ' +
-      'live from the gateway so it is always current. Free — no payment. Call this before `tool` to pick one and learn ' +
-      'its input shape. Tools reported at priceMicroUsd 0 are free to call and need no wallet.',
-    inputSchema: {},
-    outputSchema: {
-      tools: z.array(
-        z.object({
-          name: z.string(),
-          method: z.string().describe('GET tools take query parameters; POST tools take a JSON body.'),
-          priceMicroUsd: z.number().describe('0 means free — no wallet needed.'),
-          priceUsd: z.string(),
-          example: z.record(z.any()),
-          guidance: z.string(),
-        }),
-      ),
+      'Index of every GlianaAI utility tool: one short line each (name, method, price, what it does), read live from ' +
+      'the gateway. Free — no payment. Pass `name` to get ONE tool in full (example input + usage guidance) before ' +
+      'calling it with `tool`; pass `category` to list only that group. Tools at price 0 are free and need no wallet.',
+    inputSchema: {
+      name: z.string().optional().describe('One tool name: returns its full example input and guidance.'),
+      category: z.string().optional().describe('Only tools in this category (e.g. search, data, finance, media).'),
     },
     annotations: { title: 'List utility tools', readOnlyHint: true, openWorldHint: false },
   },
-  async () => {
+  // Compact on purpose. The full listing (66 tools with examples and guidance,
+  // twice — text and structuredContent) was ~10k tokens, and an agent keeps it
+  // in context and re-sends it EVERY step: a 13-step Rampung job paid ~130k
+  // input tokens for a list it used two entries of (2026-10-25).
+  async ({ name, category }) => {
     const all = await listTools();
-    const tools = all.map((t) => ({
-      name: t.name,
-      method: t.method ?? 'POST',
-      priceMicroUsd: t.priceMicroUsd,
-      priceUsd: usd(t.priceMicroUsd),
-      example: t.example ?? {},
-      guidance: t.guidance ?? '',
-    }));
-    const lines = tools.map(
-      (t) => `- ${t.name} (${t.method}, ${t.priceMicroUsd === 0 ? 'free' : t.priceUsd}) ${t.guidance || ''}`.trim(),
-    );
-    return okv(`${tools.length} utility tools:\n${lines.join('\n')}`, { tools });
+    if (name) {
+      const t = all.find((x) => x.name === name);
+      if (!t) return okv(`No tool named "${name}". Call list_tools with no arguments for the index.`, { found: false });
+      const method = t.method ?? 'POST';
+      const price = t.priceMicroUsd === 0 ? 'free' : usd(t.priceMicroUsd);
+      return okv(
+        `${t.name} (${method}, ${price})\n${t.guidance ?? ''}\nExample input: ${JSON.stringify(t.example ?? {})}`,
+        { name: t.name, method, priceMicroUsd: t.priceMicroUsd, example: t.example ?? {}, guidance: t.guidance ?? '' },
+      );
+    }
+    const rows = category ? all.filter((t) => (t as { category?: string }).category === category) : all;
+    const lines = rows.map((t) => {
+      const price = t.priceMicroUsd === 0 ? 'free' : usd(t.priceMicroUsd);
+      return `- ${t.name} (${t.method ?? 'POST'}, ${price}) ${firstSentence(t.guidance ?? '')}`;
+    });
+    return okv(`${rows.length} utility tools (list_tools {name} for one in full):\n${lines.join('\n')}`, { count: rows.length });
   },
 );
+
+/** The first sentence of a description, cut to 140 characters — enough to pick a tool. */
+function firstSentence(text: string): string {
+  const s = text.replace(/\s+/g, ' ').trim();
+  const end = s.search(/[.!](\s|$)/);
+  const one = end > 0 ? s.slice(0, end + 1) : s;
+  return one.length > 140 ? `${one.slice(0, 139)}…` : one;
+}
 
 server.registerTool(
   'tool',
