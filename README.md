@@ -1,7 +1,8 @@
 # GlianaAI MCP server
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/gliana-labs/gliana-mcp)
-[![smithery badge](https://smithery.ai/badge/glianalabs/gliana-ai)](https://smithery.ai/servers/glianalabs/gliana-ai)
+[![Smithery](https://img.shields.io/badge/Smithery-gliana--ai-FF5601)](https://smithery.ai/servers/glianalabs/gliana-ai)
+[![graded](https://graded.sh/badge/bz_fdf1efc51ba6.svg)](https://graded.sh/s/bz_fdf1efc51ba6)
 [Glama server page](https://glama.ai/mcp/servers/Gliana-Labs/gliana-mcp)
 
 Pay-per-call generative AI for any MCP client (Claude Desktop, Cursor, …).
