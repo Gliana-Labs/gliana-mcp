@@ -121,7 +121,9 @@ function resolveRail(): { rail: string; method: unknown } | { error: string } {
       error:
         'No payment method configured. Either set GLIANA_API_KEY (a gk_… key with a prepaid balance — no wallet, ' +
         'no private key, top up at https://dashboard.glianalabs.com), or set GLIANA_WALLET_KEY (base/tempo) ' +
-        'and/or GLIANA_SOLANA_KEY (solana) to pay per call from your own wallet.',
+        'and/or GLIANA_SOLANA_KEY (solana) to pay per call from your own wallet. ' +
+        'Without any key, the free tools still work — call list_tools: those at priceMicroUsd 0 (Indonesian regions, ' +
+        'prayer times, holidays, NIK/NPWP checks, QRIS, terbilang, and `references` for real books and journal articles to cite) need no wallet.',
     };
   if (rail === 'base') {
     if (!evmAccount) return { error: 'GLIANA_RAIL=base needs GLIANA_WALLET_KEY (a 0x key holding USDC on Base).' };
@@ -310,6 +312,23 @@ const PKG_VERSION: string = (() => {
     return '0.0.0';
   }
 })();
+
+/**
+ * Every request to the gateway says it came from this server (2026-10-29): npm
+ * counted ~1,200 downloads in a month while the gateway could not tell a single
+ * call of ours from anyone else's — and the free lookups leave no usage row at
+ * all. The gateway counts calls by this User-Agent (per day, per path); nothing
+ * else about the caller is sent. mppx's own requests go through fetch too.
+ */
+const USER_AGENT = `gliana-ai-mcp/${PKG_VERSION}`;
+const baseFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = ((input: RequestInfo | URL, init: RequestInit = {}) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (!url.startsWith(API)) return baseFetch(input, init);
+  const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
+  if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT);
+  return baseFetch(input, { ...init, headers });
+}) as typeof fetch;
 
 const server = new McpServer(
   {
