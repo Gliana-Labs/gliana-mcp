@@ -27,6 +27,7 @@ market-data and SEC-filing tools, with **no signup and no API key**. Paid calls 
 | `list_tools` | free | Every utility tool: price, HTTP method, example input, guidance. |
 | `tool` | mostly **paid** | Run one utility tool — scraping, screenshots, social cards, OCR, structured extraction, market data, chain RPC, reference data. |
 | `recipe` | **paid** | Run a multi-model pipeline in one call (e.g. text→image→video). |
+| `wallet` | free | The agent's wallet: its Base and Solana addresses to fund, where the key file is, and the spending limits (never the key) |
 | `get_balance` | free | Prepaid balance left on your `gk_` key (only when one is configured). |
 | `top_up` | the amount you add | Add money to your `gk_` key's balance: paid from your wallet key if one is set, otherwise an exact USDC amount and address for you to send from any wallet or exchange |
 
@@ -221,6 +222,20 @@ facilitator, so the calls are independently verifiable and not just visible to
 us. `--rail base` (default with `GLIANA_WALLET_KEY`) or `--rail solana`.
 
 ## Funding
+
+**The agent's own wallet (no key to paste).** Start the server with no wallet key
+and it makes one: a Base and a Solana key in `~/.gliana/wallet.json` (or
+`GLIANA_WALLET_FILE`), readable only by you, never sent anywhere, never shown by
+any tool. Call `wallet` for its addresses and send it a few dollars of USDC on
+Base (paying needs no ETH) or Solana. It starts with limits of $1 a call and $5
+a day; set `GLIANA_MAX_PER_CALL_USD` / `GLIANA_MAX_PER_DAY_USD` to change them.
+
+- Set `GLIANA_PASSPHRASE` **before the first start** to encrypt the file
+  (scrypt + AES-256-GCM); the same passphrase is then needed on every start.
+- **Back the file up.** It is the only copy of the keys: lose it and the USDC in
+  the wallet is gone. An existing file is never overwritten.
+- `GLIANA_NO_AUTO_WALLET=1` turns this off. A configured `GLIANA_WALLET_KEY` /
+  `GLIANA_SOLANA_KEY` always wins over the file.
 
 With a **prepaid key**, top up at [dashboard.glianalabs.com](https://dashboard.glianalabs.com)
 and check what is left with `get_balance`.

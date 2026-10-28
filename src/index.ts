@@ -29,6 +29,8 @@ import bs58 from 'bs58';
 import { baseMethod } from './rails.js';
 import { CapRefusal, SpendLedger, capOnChallenge, capsFromEnv, priceFromWwwAuthenticate, refusal } from './spend.js';
 import { z } from 'zod';
+import { ed25519 } from '@noble/curves/ed25519';
+import { AUTO_WALLET_CAPS, loadOrCreateWallet, type LoadedWallet } from './wallet.js';
 
 const API = (process.env.GLIANA_API_URL ?? 'https://api.glianalabs.com').replace(/\/+$/, '');
 
@@ -65,8 +67,33 @@ function readKey(name: string): string | undefined {
   return inline;
 }
 
-const RAW_EVM = readKey('GLIANA_WALLET_KEY');
-const RAW_SOL = readKey('GLIANA_SOLANA_KEY');
+let RAW_EVM = readKey('GLIANA_WALLET_KEY');
+let RAW_SOL = readKey('GLIANA_SOLANA_KEY');
+
+/**
+ * No wallet key configured: use (or make) the agent's own wallet, a file on this
+ * machine (src/wallet.ts). Keys supplied in the config always win, so nothing
+ * changes for an install that already pays from a wallet.
+ */
+let AUTO_WALLET: LoadedWallet | null = null;
+if (!RAW_EVM && !RAW_SOL) {
+  const r = loadOrCreateWallet(process.env, (k) => ({
+    evm: privateKeyToAccount(k.evm).address,
+    solana: bs58.encode(ed25519.getPublicKey(bs58.decode(k.solana))),
+  }));
+  if ('wallet' in r) {
+    AUTO_WALLET = r.wallet;
+    RAW_EVM = r.wallet.keys.evm;
+    RAW_SOL = r.wallet.keys.solana;
+    console.error(
+      r.wallet.created
+        ? `Made this agent's own wallet at ${r.wallet.path}${r.wallet.encrypted ? ' (encrypted)' : ' (owner-only file; set GLIANA_PASSPHRASE before first start to encrypt it)'}. Back that file up: it is the only copy of the keys. Call the wallet tool for its addresses.`
+        : `Using the agent's wallet at ${r.wallet.path}.`,
+    );
+  } else {
+    console.error(r.none);
+  }
+}
 const RAW_API_KEY = readKey('GLIANA_API_KEY');
 const RAIL = (process.env.GLIANA_RAIL ?? '').trim().toLowerCase();
 
@@ -158,7 +185,9 @@ const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(6).replace(/0+$/,
  * The balance rail cannot double-charge this way, but the rule is kept uniform
  * so no call site has to know which rail it got.
  */
-const CAPS = capsFromEnv(process.env);
+// A wallet this server made starts with limits ($1 a call, $5 a day) unless the person set their own.
+const ENV_CAPS = capsFromEnv(process.env);
+const CAPS = AUTO_WALLET && ENV_CAPS.perCallMicro === null && ENV_CAPS.perDayMicro === null ? { ...AUTO_WALLET_CAPS } : ENV_CAPS;
 const ledger = new SpendLedger();
 const capped = CAPS.perCallMicro !== null || CAPS.perDayMicro !== null;
 
@@ -220,6 +249,10 @@ async function paymentRefused(rail: string, res: Response, retryWhat: string): P
     const e = (await res.json().catch(() => ({}))) as { error?: string; detail?: string; topup_url?: string };
     const where = e.topup_url ? ` Top up: ${e.topup_url}` : '';
     return `${e.detail ?? e.error ?? 'The prepaid balance could not cover this call.'}${where}`;
+  }
+  if (AUTO_WALLET) {
+    const where = rail === 'solana' ? solanaSigner?.address : evmAccount?.address;
+    return `Payment did not settle over ${rail}. This agent's own wallet may be empty: send USDC on ${rail === 'solana' ? 'Solana' : 'Base'} to ${where}, then call ${retryWhat} again (the wallet tool shows both addresses).`;
   }
   return `Payment did not settle over ${rail} — check the wallet holds USDC on that chain, then call ${retryWhat} again.`;
 }
@@ -689,6 +722,35 @@ server.registerTool(
       balanceMicroUsd: micro,
       balanceUsd: String(j.balance_usd ?? usd(micro)),
     });
+  },
+);
+
+server.registerTool(
+  'wallet',
+  {
+    description:
+      'FREE. The wallet this server pays from: its Base and Solana addresses (send USDC there to fund it), where its key ' +
+      'file is, and the spending limits. Never returns the private key. Use it when the user asks how to fund the agent ' +
+      'or where its money is.',
+    inputSchema: {},
+    annotations: { title: 'Wallet (free)', readOnlyHint: true, openWorldHint: false },
+  },
+  async () => {
+    const evm = evmAccount?.address ?? null;
+    const sol = solanaSigner?.address ?? null;
+    if (!evm && !sol) return fail('No wallet is configured. Remove GLIANA_NO_AUTO_WALLET to let this server make one, or set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY.');
+    const caps = [CAPS.perCallMicro !== null ? `${usd(CAPS.perCallMicro)} per call` : null, CAPS.perDayMicro !== null ? `${usd(CAPS.perDayMicro)} per day` : null].filter(Boolean).join(', ');
+    return ok(
+      [
+        AUTO_WALLET ? `This agent's own wallet (made by this server), stored at ${AUTO_WALLET.path}${AUTO_WALLET.encrypted ? ', encrypted' : ''}. Back that file up: it is the only copy of the keys.` : 'The wallet from your configured key.',
+        evm ? `Base (USDC): ${evm} — send USDC on Base here; paying needs no ETH. https://basescan.org/address/${evm}` : null,
+        sol ? `Solana (USDC): ${sol} — https://solscan.io/account/${sol}` : null,
+        `Spending limits: ${caps || 'none set'}${AUTO_WALLET && caps ? ' (defaults for a self-made wallet; change with GLIANA_MAX_PER_CALL_USD / GLIANA_MAX_PER_DAY_USD)' : ''}.`,
+        'Fund it with only what you intend the agent to spend.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
   },
 );
 
