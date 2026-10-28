@@ -162,10 +162,11 @@ const CAPS = capsFromEnv(process.env);
 const ledger = new SpendLedger();
 const capped = CAPS.perCallMicro !== null || CAPS.perDayMicro !== null;
 
-async function paidFetch(path: string, body: string): Promise<{ rail: string; res: Response } | { error: string }> {
+async function paidFetch(path: string, body: string, walletOnly = false): Promise<{ rail: string; res: Response } | { error: string }> {
   const url = `${API}${path}`;
   const headers = { 'content-type': 'application/json' };
-  const key = glianaKey();
+  // walletOnly: top_up, which must never be paid FROM the balance it is funding.
+  const key = walletOnly ? null : glianaKey();
   if (key) {
     let quoted: number | null = null;
     if (capped) {
@@ -688,6 +689,52 @@ server.registerTool(
       balanceMicroUsd: micro,
       balanceUsd: String(j.balance_usd ?? usd(micro)),
     });
+  },
+);
+
+server.registerTool(
+  'top_up',
+  {
+    description:
+      'Add money to the prepaid balance of the configured GLIANA_API_KEY (the balance shown at https://dashboard.glianalabs.com). ' +
+      'With a wallet key configured (GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY) this PAYS `usd` from that wallet now and the ' +
+      'balance is credited at once — it spends real money, so only call it when the user asked to top up. Without a wallet ' +
+      'it returns an exact USDC amount and address for the user to send from any wallet or exchange (credited within ' +
+      'about 15 minutes; check with get_balance). usd: whole dollars, 1-100 (5, 10, 25, 50 or 100 for a manual transfer).',
+    inputSchema: {
+      usd: z.number().int().min(1).max(100).describe('Dollars to add to the balance.'),
+      network: z.enum(['base', 'solana']).optional().describe('For a manual transfer: which chain to send USDC on (default base).'),
+    },
+    annotations: { title: 'Top up balance', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  async ({ usd: amount, network }) => {
+    const key = glianaKey();
+    if (!key)
+      return fail('No GLIANA_API_KEY configured: there is no balance to top up. Create a key at https://dashboard.glianalabs.com, put it in GLIANA_API_KEY, then try again.');
+    const body = JSON.stringify({ usd: amount, key });
+    if (evmAccount || solanaSigner) {
+      const paid = await paidFetch('/v1/keys/topup', body, true);
+      if ('error' in paid) return fail(paid.error);
+      const j = (await paid.res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (paid.res.status === 402) return fail(await paymentRefused(paid.rail, paid.res, 'top_up'));
+      if (!paid.res.ok) return fail(String(j.detail ?? j.error ?? `Top-up failed (HTTP ${paid.res.status})`));
+      return ok(`Topped up $${amount} from the ${paid.rail} wallet. Balance now ${j.balance_usd ? `$${j.balance_usd}` : 'updated'}.`);
+    }
+    // No wallet here: a quote for the user to pay by hand.
+    const res = await fetch(`${API}/v1/keys/topup/usdc`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ usd: amount, key, network: network ?? 'base' }),
+    });
+    const q = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return fail(String(q.detail ?? q.error ?? `Could not open a top-up (HTTP ${res.status})`));
+    return ok(
+      `To add $${amount}, send EXACTLY ${q.amountUsdc} USDC on ${q.network} to ${q.address}` +
+        ` (token ${q.tokenAddress}). The odd cents identify the payment, so send that exact amount; if an exchange takes its fee ` +
+        `out of the amount, add it. Credited within about 15 minutes of arriving — check with get_balance. ` +
+        `This quote is watched for 24 hours.` +
+        (q.payUrl ? ` Phone wallet link (Solana Pay): ${q.payUrl}` : ''),
+    );
   },
 );
 

@@ -28,6 +28,7 @@ market-data and SEC-filing tools, with **no signup and no API key**. Paid calls 
 | `tool` | mostly **paid** | Run one utility tool — scraping, screenshots, social cards, OCR, structured extraction, market data, chain RPC, reference data. |
 | `recipe` | **paid** | Run a multi-model pipeline in one call (e.g. text→image→video). |
 | `get_balance` | free | Prepaid balance left on your `gk_` key (only when one is configured). |
+| `top_up` | the amount you add | Add money to your `gk_` key's balance: paid from your wallet key if one is set, otherwise an exact USDC amount and address for you to send from any wallet or exchange |
 
 `list_tools` reads the gateway live, so it is never out of date — which is why this
 table doesn't enumerate the utility tools. A written-down list goes stale the moment
