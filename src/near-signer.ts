@@ -21,7 +21,8 @@ import { rsvFromMpc, signArgs, SIGN_DEPOSIT, SIGN_GAS, SIGNER_CONTRACT, type Aut
 export type NearKey = { account_id: string; private_key: string };
 
 function accountOf(key: NearKey, network: NearNetwork) {
-  const provider = new JsonRpcProvider({ url: `https://rpc.${network}.near.org` });
+  // FastNEAR, not rpc.<network>.near.org: 0.1-0.3 s a call against 3.1-3.7 s (measured 2026-10-29).
+  const provider = new JsonRpcProvider({ url: process.env.GLIANA_NEAR_RPC_URL?.trim() || `https://rpc.${network}.fastnear.com` });
   return { provider, account: new Account(key.account_id, provider, new KeyPairSigner(KeyPair.fromString(key.private_key as `ed25519:${string}`))) };
 }
 
@@ -45,6 +46,10 @@ export function allowanceSigner(key: NearKey, contractId: string, network: NearN
     // The contract's own digest must equal ours, or the signature would be for a different payment.
     const theirs = String(await provider.callFunction(contractId, 'preview_digest', termsOf(auth)));
     if (theirs.toLowerCase() !== digest.toLowerCase()) throw new Error(`${contractId} builds a different digest than this client; not signing.`);
+    // The policy as a free view first: a refusal in ~0.2 s with nothing sent, instead of a
+    // failed transaction (11.6 s on mainnet). `pay` still enforces every rule on chain.
+    const why = (await provider.callFunction(contractId, 'check', { agent: key.account_id, to: auth.to, value: String(auth.value), valid_after: String(auth.validAfter), valid_before: String(auth.validBefore) }).catch(() => null)) as string | null;
+    if (why) throw new Error(`Refused by the allowance ${contractId}: ${why}. Nothing was sent.`);
     try {
       return rsvFromMpc(checked(await account.callFunction({ contractId, methodName: 'pay', args: termsOf(auth), gas: SIGN_GAS, deposit: SIGN_DEPOSIT })));
     } catch (err) {
