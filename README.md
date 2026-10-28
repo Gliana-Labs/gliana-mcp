@@ -223,6 +223,16 @@ us. `--rail base` (default with `GLIANA_WALLET_KEY`) or `--rail solana`.
 
 ## Funding
 
+**Pay with a NEAR account (no EVM key at all).** Set `GLIANA_NEAR_KEY_FILE` to a
+`{"account_id":"…","private_key":"ed25519:…"}` file. NEAR Chain Signatures sign each
+Base USDC payment; the Base address is derived from the account (the `wallet` tool
+shows it). Add `GLIANA_NEAR_ALLOWANCE=allowance.<you>` to pay through an
+[agent-allowance contract](https://github.com/Gliana-Labs/gliana-near-x402#the-safety-layer-an-allowance-enforced-on-near):
+then the key is the agent's and may only *ask*, and the contract signs only to the
+payees, per-payment and daily limits its owner set. The account needs ~0.35 NEAR
+for signing gas (mostly refunded); each payment takes ~15-20 s.
+`GLIANA_NEAR_NETWORK=testnet` for testnet.
+
 **The agent's own wallet (no key to paste).** Start the server with no wallet key
 and it makes one: a Base and a Solana key in `~/.gliana/wallet.json` (or
 `GLIANA_WALLET_FILE`), readable only by you, never sent anywhere, never shown by

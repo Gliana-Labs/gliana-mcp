@@ -71,12 +71,36 @@ let RAW_EVM = readKey('GLIANA_WALLET_KEY');
 let RAW_SOL = readKey('GLIANA_SOLANA_KEY');
 
 /**
+ * Pay with a NEAR account (2026-10-29): GLIANA_NEAR_KEY_FILE points at
+ * {"account_id":"…","private_key":"ed25519:…"}. NEAR Chain Signatures sign the Base
+ * USDC payment, so no EVM key exists anywhere. With GLIANA_NEAR_ALLOWANCE set, the
+ * key is the AGENT's and may only ask that agent-allowance contract, which holds
+ * the Base address and signs within its owner's budget (src/near-signer.ts).
+ */
+const NEAR_KEY: { account_id: string; private_key: string } | null = (() => {
+  const raw = readKey('GLIANA_NEAR_KEY');
+  if (!raw) return null;
+  try {
+    const k = JSON.parse(raw) as { account_id?: string; private_key?: string };
+    if (k.account_id && k.private_key?.startsWith('ed25519:')) return { account_id: k.account_id, private_key: k.private_key };
+  } catch {
+    /* fall through */
+  }
+  console.error('GLIANA_NEAR_KEY(_FILE) must be {"account_id":"…","private_key":"ed25519:…"} — the NEAR rail is disabled.');
+  return null;
+})();
+const NEAR_ALLOWANCE = process.env.GLIANA_NEAR_ALLOWANCE?.trim() || null;
+const NEAR_NETWORK = (process.env.GLIANA_NEAR_NETWORK?.trim() === 'testnet' ? 'testnet' : 'mainnet') as 'mainnet' | 'testnet';
+const NEAR_PATH = process.env.GLIANA_NEAR_PATH?.trim() || 'gliana-x402';
+
+/**
  * No wallet key configured: use (or make) the agent's own wallet, a file on this
  * machine (src/wallet.ts). Keys supplied in the config always win, so nothing
  * changes for an install that already pays from a wallet.
  */
 let AUTO_WALLET: LoadedWallet | null = null;
-if (!RAW_EVM && !RAW_SOL) {
+// A configured NEAR account is a wallet too: no self-made one beside it.
+if (!RAW_EVM && !RAW_SOL && !NEAR_KEY) {
   const r = loadOrCreateWallet(process.env, (k) => ({
     evm: privateKeyToAccount(k.evm).address,
     solana: bs58.encode(ed25519.getPublicKey(bs58.decode(k.solana))),
@@ -142,7 +166,7 @@ async function buildSolanaSigner(key: string) {
 
 /** Which rail to pay with, and whether its key is present. */
 function resolveRail(): { rail: string; method: unknown } | { error: string } {
-  const rail = RAIL || (evmAccount ? 'base' : solanaSigner ? 'solana' : '');
+  const rail = RAIL || (evmAccount ? 'base' : solanaSigner ? 'solana' : NEAR_KEY ? 'near' : '');
   if (!rail)
     return {
       error:
@@ -164,7 +188,11 @@ function resolveRail(): { rail: string; method: unknown } | { error: string } {
     if (!solanaSigner) return { error: 'GLIANA_RAIL=solana needs GLIANA_SOLANA_KEY (a Solana key holding USDC).' };
     return { rail, method: solana.charge({ signer: solanaSigner as never }) };
   }
-  return { error: `Unknown GLIANA_RAIL "${rail}". Use base, tempo, or solana.` };
+  if (rail === 'near') {
+    if (!NEAR_KEY) return { error: 'GLIANA_RAIL=near needs GLIANA_NEAR_KEY_FILE (a NEAR account key file).' };
+    return { rail, method: null };
+  }
+  return { error: `Unknown GLIANA_RAIL "${rail}". Use base, tempo, solana, or near.` };
 }
 
 const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}`;
@@ -216,6 +244,7 @@ async function paidFetch(path: string, body: string, walletOnly = false): Promis
   }
   const picked = resolveRail();
   if ('error' in picked) return { error: picked.error };
+  if (picked.rail === 'near') return nearFetch(path, body);
   let quoted = 0;
   // Fresh client per attempt so a stale 402 challenge is never reused.
   const mppx = Mppx.create({
@@ -236,6 +265,53 @@ async function paidFetch(path: string, body: string, walletOnly = false): Promis
   return { rail: picked.rail, res };
 }
 
+/** The x402 twin of each paid path: the NEAR payer speaks x402 (EIP-3009 on Base). */
+function x402PathOf(path: string, body: string): { path: string; body: string } | null {
+  if (path === '/v1/infer') {
+    const { model, ...input } = JSON.parse(body) as { model?: string };
+    return model ? { path: `/x402/${encodeURIComponent(model)}`, body: JSON.stringify(input) } : null;
+  }
+  const m = /^\/v1\/(tools|recipes)\/([a-z0-9-]+)$/.exec(path);
+  return m ? { path: `/x402/${m[1]}/${m[2]}`, body } : null;
+}
+
+let nearFrom: `0x${string}` | null = null;
+/** The Base address the NEAR rail pays from: the allowance contract's, else the account's. */
+async function nearAddress(): Promise<`0x${string}`> {
+  if (!nearFrom) {
+    const { deriveEvmAddress } = await import('./near.js');
+    nearFrom = await deriveEvmAddress(NEAR_ALLOWANCE ?? NEAR_KEY!.account_id, NEAR_PATH, NEAR_NETWORK);
+  }
+  return nearFrom;
+}
+
+/** One payment from a NEAR account — ONE attempt, like every rail: the nonce is single-use. */
+async function nearFetch(path: string, body: string): Promise<{ rail: string; res: Response } | { error: string }> {
+  const target = x402PathOf(path, body);
+  if (!target) return { error: 'This call cannot be paid from a NEAR account yet (only models, tools and recipes).' };
+  const [{ payWithNear }, { directSigner, allowanceSigner }] = await Promise.all([import('./near.js'), import('./near-signer.js')]);
+  const sign = NEAR_ALLOWANCE ? allowanceSigner(NEAR_KEY!, NEAR_ALLOWANCE, NEAR_NETWORK) : directSigner(NEAR_KEY!, NEAR_PATH, NEAR_NETWORK);
+  let quoted = 0;
+  try {
+    const r = await payWithNear({
+      url: `${API}${target.path}`,
+      body: JSON.parse(target.body),
+      from: await nearAddress(),
+      sign,
+      // The spending caps apply here too, checked against the 402's price before anything is signed.
+      beforeSign: (micro) => {
+        quoted = micro;
+        const why = refusal(micro, CAPS, ledger.spentToday());
+        if (why) throw new CapRefusal(why);
+      },
+    });
+    if (r.status === 200 && capped) ledger.record(quoted);
+    return { rail: 'near', res: new Response(JSON.stringify(r.body ?? {}), { status: r.status, headers: { 'content-type': 'application/json' } }) };
+  } catch (err) {
+    return { error: String((err as Error)?.message ?? err).slice(0, 400) };
+  }
+}
+
 /**
  * What to tell the caller about a 402, which means something different per rail.
  *
@@ -249,6 +325,9 @@ async function paymentRefused(rail: string, res: Response, retryWhat: string): P
     const e = (await res.json().catch(() => ({}))) as { error?: string; detail?: string; topup_url?: string };
     const where = e.topup_url ? ` Top up: ${e.topup_url}` : '';
     return `${e.detail ?? e.error ?? 'The prepaid balance could not cover this call.'}${where}`;
+  }
+  if (rail === 'near') {
+    return `Payment did not settle: the Base address ${await nearAddress()} (paid from ${NEAR_ALLOWANCE ?? NEAR_KEY?.account_id}) may hold too little USDC — send USDC on Base there, then call ${retryWhat} again.`;
   }
   if (AUTO_WALLET) {
     const where = rail === 'solana' ? solanaSigner?.address : evmAccount?.address;
@@ -738,6 +817,18 @@ server.registerTool(
   async () => {
     const evm = evmAccount?.address ?? null;
     const sol = solanaSigner?.address ?? null;
+    if (NEAR_KEY && !evm && !sol) {
+      const from = await nearAddress();
+      return ok(
+        [
+          NEAR_ALLOWANCE
+            ? `Paying from NEAR: the agent account ${NEAR_KEY.account_id} may only ask the allowance contract ${NEAR_ALLOWANCE} (${NEAR_NETWORK}), which holds the Base address and signs within its owner's budget. Its policy: \`near view ${NEAR_ALLOWANCE} get_policy\`.`
+            : `Paying from the NEAR account ${NEAR_KEY.account_id} (${NEAR_NETWORK}) through NEAR Chain Signatures — no EVM private key exists.`,
+          `Base (USDC): ${from} — send USDC on Base here. https://basescan.org/address/${from}`,
+          `The NEAR account needs ~0.35 NEAR for signing gas (300 TGas is reserved per payment, mostly refunded). Each payment takes ~15-20 s.`,
+        ].join('\n'),
+      );
+    }
     if (!evm && !sol) return fail('No wallet is configured. Remove GLIANA_NO_AUTO_WALLET to let this server make one, or set GLIANA_WALLET_KEY / GLIANA_SOLANA_KEY.');
     const caps = [CAPS.perCallMicro !== null ? `${usd(CAPS.perCallMicro)} per call` : null, CAPS.perDayMicro !== null ? `${usd(CAPS.perDayMicro)} per day` : null].filter(Boolean).join(', ');
     return ok(
@@ -837,7 +928,7 @@ async function main() {
         `${also ? ` (wallet rails ${also} are configured but the key takes precedence — unset GLIANA_API_KEY to use them)` : ''}.`,
     );
   } else {
-    const rails = [evmAccount && 'base', evmAccount && 'tempo', solanaSigner && 'solana'].filter(Boolean).join(', ') || 'none';
+    const rails = [evmAccount && 'base', evmAccount && 'tempo', solanaSigner && 'solana', NEAR_KEY && (NEAR_ALLOWANCE ? `near (allowance ${NEAR_ALLOWANCE})` : 'near')].filter(Boolean).join(', ') || 'none';
     console.error(
       `gliana-ai MCP ready (${API}). generate rails: ${rails}${RAIL ? ` (using ${RAIL})` : ''}.` +
         (rails === 'none'
