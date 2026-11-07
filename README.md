@@ -233,6 +233,8 @@ payees, per-payment and daily limits its owner set. The account needs ~0.35 NEAR
 for signing gas (mostly refunded); each payment takes ~15-20 s.
 `GLIANA_NEAR_NETWORK=testnet` for testnet.
 
+A payment the allowance holds for its owner waits up to 4 minutes for their approval (`GLIANA_NEAR_HOLD_WAIT_S`), then says nothing was paid.
+
 **The agent's own wallet (no key to paste).** Start the server with no wallet key
 and it makes one: a Base and a Solana key in `~/.gliana/wallet.json` (or
 `GLIANA_WALLET_FILE`), readable only by you, never sent anywhere, never shown by

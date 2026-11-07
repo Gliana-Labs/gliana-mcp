@@ -319,3 +319,19 @@ describe('rsvFromMpc — against a real v1.signer reply', () => {
     expect(SIGN_DEPOSIT).toBe(1n);
   });
 });
+
+describe('x402 v2 sellers', () => {
+  const accept = { scheme: 'exact', network: 'eip155:8453', amount: '1000', payTo: '0x6d6E695b09861467c7d462f5AAF31cF3540B9192', asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', maxTimeoutSeconds: 60, extra: { name: 'USD Coin', version: '2' } };
+  it('reads the challenge from the header and answers in kind', async () => {
+    const seen: Record<string, string>[] = [];
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      seen.push(init.headers as Record<string, string>);
+      return seen.length === 1 ? new Response(null, { status: 402, headers: { 'payment-required': btoa(JSON.stringify({ x402Version: 2, resource: { url: 'x' }, accepts: [accept] })) } }) : new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const r = await payWithNear({ url: 'https://x.test', from: '0x1eC5840530f6730507162035E4924c49CCF9679d', fetchImpl, sign: async () => ({ r: `0x${'a'.repeat(64)}`, s: `0x${'b'.repeat(64)}`, v: 0 }) as never });
+    expect(r.chargedMicroUsd).toBe(1000);
+    expect(JSON.parse(atob(seen[1]['PAYMENT-SIGNATURE'])).accepted).toEqual(accept);
+    expect(seen[1]['X-PAYMENT']).toBeUndefined();
+  });
+});
+

@@ -38,7 +38,9 @@ export type HashSigner = (digest: Hex, auth: Authorization) => Promise<Rsv>;
 export interface Accept {
   scheme: string;
   network: string;
+  /** x402 v1 says maxAmountRequired, v2 says amount. readChallenge fills this in from either. */
   maxAmountRequired: string;
+  amount?: string;
   resource?: string;
   payTo: string;
   asset: string;
@@ -48,6 +50,7 @@ export interface Accept {
 
 export interface Challenge {
   x402Version?: number;
+  resource?: unknown;
   accepts?: Accept[];
   error?: string;
 }
@@ -178,6 +181,22 @@ export function buildAuthorization(accept: Accept, from: Hex, now = Date.now()):
   };
 }
 
+/** What a 402 asks for: v1 sellers put it in the body, v2 sellers in a base64 `payment-required` header. */
+export async function readChallenge(res: Response): Promise<Challenge> {
+  let challenge = (await res.json().catch(() => ({}))) as Challenge;
+  if (!challenge.accepts?.length) {
+    const header = res.headers.get('payment-required');
+    if (header) challenge = JSON.parse(atob(header)) as Challenge;
+  }
+  return { ...challenge, accepts: challenge.accepts?.map((a) => ({ ...a, maxAmountRequired: a.maxAmountRequired ?? a.amount ?? '' })) };
+}
+
+/** x402 v2's header: the seller's own option echoed back, so it can tell which one was paid. */
+export function paymentSignatureHeader(challenge: Challenge, accept: Accept, auth: Authorization, signature: Hex): string {
+  const { maxAmountRequired: _filledIn, ...accepted } = accept;
+  return btoa(JSON.stringify({ x402Version: 2, payload: { signature, authorization: auth }, resource: challenge.resource, accepted }));
+}
+
 /**
  * The X-PAYMENT header value.
  *
@@ -246,7 +265,7 @@ export async function payWithNear(opts: {
     };
   }
 
-  const challenge = (await probe.json().catch(() => ({}))) as Challenge;
+  const challenge = await readChallenge(probe);
   const accept = selectAccept(challenge);
   if (!accept) {
     const offered = (challenge.accepts ?? []).map((a) => `${a.network}/${a.scheme}`).join(', ') || 'none';
@@ -262,7 +281,10 @@ export async function payWithNear(opts: {
 
   const paid = await doFetch(opts.url, {
     ...init,
-    headers: { ...(init.headers as Record<string, string>), 'X-PAYMENT': paymentHeader(accept, auth, signature) },
+    headers: {
+      ...(init.headers as Record<string, string>),
+      ...(challenge.x402Version === 2 ? { 'PAYMENT-SIGNATURE': paymentSignatureHeader(challenge, accept, auth, signature) } : { 'X-PAYMENT': paymentHeader(accept, auth, signature) }),
+    },
   });
 
   return {

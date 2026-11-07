@@ -8,6 +8,7 @@
  *              Base address, rebuilds the digest from the terms and signs only
  *              within the owner's policy (payee list, per-payment and daily caps,
  *              one-hour validity). A leaked agent key is worth one day's budget.
+ *              A payment that's unusual waits for the owner: nothing is signed until they approve.
  *
  * Loaded only when GLIANA_NEAR_KEY_FILE is set, so the @near-js packages cost a
  * wallet or balance user nothing at startup.
@@ -38,6 +39,24 @@ export function directSigner(key: NearKey, path: string, network: NearNetwork): 
     rsvFromMpc(checked(await account.callFunction({ contractId: SIGNER_CONTRACT[network], methodName: 'sign', args: signArgs(digest, path), gas: SIGN_GAS, deposit: SIGN_DEPOSIT })));
 }
 
+type Held = { status: string; signature: string | null };
+/** How long a call waits for the owner, in seconds. MCP clients have their own limits, so it's settable. */
+const holdWaitS = () => Number(process.env.GLIANA_NEAR_HOLD_WAIT_S) || 240;
+
+/**
+ * Waits for the owner's answer to a held payment. The signature comes from the contract, once they approve.
+ * If they don't answer in time, nothing was signed or paid, and the agent has to say so rather than retry on its own.
+ */
+export async function waitForOwner(read: () => Promise<Held | null>, id: string, contractId: string, until: number, now = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<MpcSignature> {
+  while (now() < until) {
+    const h = await read();
+    if (h?.status === 'rejected') throw new Error(`The owner rejected payment ${id} on ${contractId}. Nothing was paid.`);
+    if (h?.status === 'signed' && h.signature) return JSON.parse(h.signature) as MpcSignature;
+    await sleep(3000);
+  }
+  throw new Error(`Payment ${id} is waiting for the owner of ${contractId}, who hasn't approved it yet. Nothing was paid. Ask them to look at https://gliana-labs.github.io/gliana-near-x402/?contract=${contractId}`);
+}
+
 const termsOf = (a: Authorization) => ({ to: a.to, value: String(a.value), valid_after: String(a.validAfter), valid_before: String(a.validBefore), nonce: a.nonce });
 
 export function allowanceSigner(key: NearKey, contractId: string, network: NearNetwork): HashSigner {
@@ -49,9 +68,17 @@ export function allowanceSigner(key: NearKey, contractId: string, network: NearN
     // The policy as a free view first: a refusal in ~0.2 s with nothing sent, instead of a
     // failed transaction (11.6 s on mainnet). `pay` still enforces every rule on chain.
     const why = (await provider.callFunction(contractId, 'check', { agent: key.account_id, to: auth.to, value: String(auth.value), valid_after: String(auth.validAfter), valid_before: String(auth.validBefore) }).catch(() => null)) as string | null;
-    if (why) throw new Error(`Refused by the allowance ${contractId}: ${why}. Nothing was sent.`);
+    // "held: ..." isn't a refusal: the contract keeps it for the owner.
+    if (why && !why.startsWith('held:')) throw new Error(`Refused by the allowance ${contractId}: ${why}. Nothing was sent.`);
     try {
-      return rsvFromMpc(checked(await account.callFunction({ contractId, methodName: 'pay', args: termsOf(auth), gas: SIGN_GAS, deposit: SIGN_DEPOSIT })));
+      const answer = (await account.callFunction({ contractId, methodName: 'pay', args: termsOf(auth), gas: SIGN_GAS, deposit: SIGN_DEPOSIT })) as (MpcSignature & { held?: string; refused?: string }) | null;
+      if (answer?.refused) throw new Error(`Smart contract panicked: ${answer.refused}`);
+      if (answer?.held) {
+        const id = answer.held;
+        const until = Math.min(Date.now() + holdWaitS() * 1000, Number(auth.validBefore) * 1000);
+        return rsvFromMpc(await waitForOwner(() => provider.callFunction(contractId, 'get_held', { id }) as Promise<Held | null>, id, contractId, until));
+      }
+      return rsvFromMpc(checked(answer));
     } catch (err) {
       // A policy refusal is the contract's own panic message: hand that over, not a stack.
       const why = /Smart contract panicked: ([^"\\n]+)/.exec(String((err as Error)?.message ?? err))?.[1];
