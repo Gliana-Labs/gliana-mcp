@@ -494,7 +494,7 @@ server.registerTool(
       'Quote the exact cost of one call for a model (optionally with input that affects price, e.g. video duration or TTS character count). Free.',
     inputSchema: {
       model: z.string().describe('Model id from list_models, e.g. "nano-banana-2" or "veo-3.1-fast".'),
-      input: z.record(z.any()).optional().describe('Optional model input that affects price (e.g. { duration: 8 } or { text: "..." }).'),
+      input: z.record(z.string(), z.any()).optional().describe('Optional model input that affects price (e.g. { duration: 8 } or { text: "..." }).'),
     },
     outputSchema: {
       model: z.string(),
@@ -528,7 +528,7 @@ server.registerTool(
       model: z.string(),
       category: z.string(),
       required: z.array(z.string()),
-      props: z.record(z.any()),
+      props: z.record(z.string(), z.any()),
     },
     annotations: { title: 'Get input schema', readOnlyHint: true, openWorldHint: true },
   },
@@ -550,7 +550,7 @@ server.registerTool(
       'Run a model and return the result — a media URL for image/video/audio/music models, assistant text for text (LLM) models. Text models take OpenAI-style input: { messages: [{ role, content }, …], max_tokens? }. PAID: settles the price from your wallet over the configured rail (base/tempo/solana). Call get_schema first for the input shape, get_price for the cost. File inputs (image/video/audio, e.g. image-to-video or video-to-video `video_uri`) take a public URL — upload a local file with POST /v1/media (≤40MB) to get one. Array file fields (e.g. `images`, `reference_images` for multi-reference models) take an ARRAY of such URLs.',
     inputSchema: {
       model: z.string().describe('Model id from list_models.'),
-      input: z.record(z.any()).describe('Model input, e.g. { prompt: "a red fox" } or { text: "hello" }. See get_schema.'),
+      input: z.record(z.string(), z.any()).describe('Model input, e.g. { prompt: "a red fox" } or { text: "hello" }. See get_schema.'),
     },
     outputSchema: {
       model: z.string(),
@@ -656,7 +656,7 @@ server.registerTool(
       'at priceMicroUsd 0 are free and need no wallet at all.',
     inputSchema: {
       name: z.string().describe('Utility tool name exactly as list_tools reports it, e.g. scrape, ocr-id, address-id, extract, exchange-rate, prayer-times.'),
-      args: z.record(z.any()).describe("The tool's input, as list_tools shows in `example`. For GET tools these become query parameters; for POST tools, the JSON body."),
+      args: z.record(z.string(), z.any()).describe("The tool's input, as list_tools shows in `example`. For GET tools these become query parameters; for POST tools, the JSON body."),
     },
     outputSchema: {
       tool: z.string(),
@@ -730,7 +730,7 @@ server.registerTool(
       'with audio (no prompt). Override steps with { imageModel, videoModel }. See https://ai.glianalabs.com/docs#recipes.',
     inputSchema: {
       name: z.string().describe('Recipe name: image-to-video, image-to-video-hd, image-to-video-audio, or brainrot-video.'),
-      args: z.record(z.any()).describe('Recipe input, e.g. { prompt, motionPrompt?, duration?, resolution? }.'),
+      args: z.record(z.string(), z.any()).describe('Recipe input, e.g. { prompt, motionPrompt?, duration?, resolution? }.'),
     },
     outputSchema: {
       recipe: z.string(),
