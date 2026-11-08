@@ -235,6 +235,15 @@ for signing gas (mostly refunded); each payment takes ~15-20 s.
 
 A payment the allowance holds for its owner waits up to 4 minutes for their approval (`GLIANA_NEAR_HOLD_WAIT_S`), then says nothing was paid.
 
+**Ask the user for a budget instead (Saku, opt-in).** With no key configured, ask the agent to *"set up a Saku budget"*.
+The `saku_setup` tool makes a NEAR key for the agent on this machine (`~/.gliana/saku.json`, owner-only; only the public
+half leaves it) and answers with a link. The user opens it, sets the limits and the sellers, and confirms one transaction
+in their own NEAR wallet (about 3 NEAR on testnet: 2.5 is the contract's storage, the rest the agent's gas). Call the tool
+again, restart the client, and payments go through the user's allowance, which signs only within their rules: a stolen
+agent key is worth one day's budget at most. The trade-off: each payment takes ~15-20 s, and one over the limits or to a
+new seller waits for the user. A key set in the config always wins over `saku.json`; delete the file to stop using it.
+Testnet for now (mainnet opens after an audit).
+
 **The agent's own wallet (no key to paste).** Start the server with no wallet key
 and it makes one: a Base and a Solana key in `~/.gliana/wallet.json` (or
 `GLIANA_WALLET_FILE`), readable only by you, never sent anywhere, never shown by

@@ -31,6 +31,7 @@ import { CapRefusal, SpendLedger, capOnChallenge, capsFromEnv, priceFromWwwAuthe
 import { z } from 'zod';
 import { ed25519 } from '@noble/curves/ed25519';
 import { AUTO_WALLET_CAPS, loadOrCreateWallet, type LoadedWallet } from './wallet.js';
+import { nearView, newSaku, readSaku, SAKU_FACTORY, sakuAccounts as newSakuAccounts, sakuPath, sakuState, setupLink, validSakuName, writeSaku, type SakuNetwork } from './saku.js';
 
 const API = (process.env.GLIANA_API_URL ?? 'https://api.glianalabs.com').replace(/\/+$/, '');
 
@@ -77,9 +78,16 @@ let RAW_SOL = readKey('GLIANA_SOLANA_KEY');
  * key is the AGENT's and may only ask that agent-allowance contract, which holds
  * the Base address and signs within its owner's budget (src/near-signer.ts).
  */
+/**
+ * A Saku budget the user confirmed in their wallet (src/saku.ts, the saku_setup tool). Used only when no NEAR key
+ * is configured: what's set in the config always wins.
+ */
+const NEAR_KEY_SET = Boolean(process.env.GLIANA_NEAR_KEY?.trim() || process.env.GLIANA_NEAR_KEY_FILE?.trim());
+const SAKU = !NEAR_KEY_SET ? readSaku(process.env) : null;
+const SAKU_ON = SAKU?.confirmed ? SAKU : null;
 const NEAR_KEY: { account_id: string; private_key: string } | null = (() => {
   const raw = readKey('GLIANA_NEAR_KEY');
-  if (!raw) return null;
+  if (!raw) return SAKU_ON ? { account_id: SAKU_ON.agent, private_key: SAKU_ON.private_key } : null;
   try {
     const k = JSON.parse(raw) as { account_id?: string; private_key?: string };
     if (k.account_id && k.private_key?.startsWith('ed25519:')) return { account_id: k.account_id, private_key: k.private_key };
@@ -89,8 +97,9 @@ const NEAR_KEY: { account_id: string; private_key: string } | null = (() => {
   console.error('GLIANA_NEAR_KEY(_FILE) must be {"account_id":"…","private_key":"ed25519:…"} — the NEAR rail is disabled.');
   return null;
 })();
-const NEAR_ALLOWANCE = process.env.GLIANA_NEAR_ALLOWANCE?.trim() || null;
-const NEAR_NETWORK = (process.env.GLIANA_NEAR_NETWORK?.trim() === 'testnet' ? 'testnet' : 'mainnet') as 'mainnet' | 'testnet';
+const NEAR_ALLOWANCE = process.env.GLIANA_NEAR_ALLOWANCE?.trim() || SAKU_ON?.allowance || null;
+const NEAR_NETWORK = (SAKU_ON && !NEAR_KEY_SET ? SAKU_ON.network : process.env.GLIANA_NEAR_NETWORK?.trim() === 'testnet' ? 'testnet' : 'mainnet') as 'mainnet' | 'testnet';
+if (SAKU_ON) console.error(`Paying through the Saku allowance ${SAKU_ON.allowance} (${SAKU_ON.network}), as its agent ${SAKU_ON.agent}. Each payment takes ~15-20 s.`);
 const NEAR_PATH = process.env.GLIANA_NEAR_PATH?.trim() || 'gliana-x402';
 
 /**
@@ -279,8 +288,13 @@ let nearFrom: `0x${string}` | null = null;
 /** The Base address the NEAR rail pays from: the allowance contract's, else the account's. */
 async function nearAddress(): Promise<`0x${string}`> {
   if (!nearFrom) {
-    const { deriveEvmAddress } = await import('./near.js');
-    nearFrom = await deriveEvmAddress(NEAR_ALLOWANCE ?? NEAR_KEY!.account_id, NEAR_PATH, NEAR_NETWORK);
+    // An allowance says which address it signs for: allowances made by the Saku factory use the path `saku`, not
+    // this server's default, so deriving it here would name an address nobody controls (2026-11-09).
+    if (NEAR_ALLOWANCE) nearFrom = (await nearView<{ from: `0x${string}` }>(NEAR_NETWORK, NEAR_ALLOWANCE, 'get_policy')).from;
+    else {
+      const { deriveEvmAddress } = await import('./near.js');
+      nearFrom = await deriveEvmAddress(NEAR_KEY!.account_id, NEAR_PATH, NEAR_NETWORK);
+    }
   }
   return nearFrom;
 }
@@ -841,6 +855,75 @@ server.registerTool(
       ]
         .filter(Boolean)
         .join('\n'),
+    );
+  },
+);
+
+server.registerTool(
+  'saku_setup',
+  {
+    description:
+      'FREE. Opt-in: ask the user for a spending budget enforced on NEAR (Saku) instead of paying from a wallet key that ' +
+      'can spend everything in it. Makes a NEAR key for this agent on this machine (the private half never leaves it) and ' +
+      'returns a link. The user opens it, sets the limits and the sellers, and confirms one transaction in their own NEAR ' +
+      'wallet; call this tool again afterwards to check, then restart the MCP client. From then on payments go through ' +
+      "the user's allowance contract, which signs only within their rules, so a stolen agent key is worth one day's budget " +
+      'at most. Trade-off to tell the user: each payment then takes ~15-20 s (NEAR’s MPC network signs it), and one over ' +
+      'the limits or to a new seller waits for their approval. Testnet unless network is "mainnet".',
+    inputSchema: {
+      name: z.string().optional().describe('Short name for the allowance: a-z, 0-9 and dashes, 2-24 long. Default: a random one.'),
+      network: z.enum(['testnet', 'mainnet']).optional().describe('Default testnet.'),
+    },
+    annotations: { title: 'Saku budget setup (free)', readOnlyHint: false, openWorldHint: true },
+  },
+  async ({ name, network }) => {
+    if (NEAR_KEY_SET) return ok(`Already paying from the NEAR account set in the config (${NEAR_KEY?.account_id ?? 'GLIANA_NEAR_KEY'}${NEAR_ALLOWANCE ? `, through ${NEAR_ALLOWANCE}` : ''}). Nothing to set up.`);
+    const net: SakuNetwork = network === 'mainnet' ? 'mainnet' : 'testnet';
+    let f = readSaku(process.env);
+    if (f?.confirmed) {
+      const st = await sakuState(f).catch(() => null);
+      if (st?.state === 'taken') return fail(`${f.allowance} no longer lists this agent (${st.agent === f.allowance ? 'the owner revoked it' : `its agent is now ${st.agent}`}). Nothing will be paid through it. Remove ${sakuPath(process.env)} to start a new setup.`);
+      return ok([`Saku is set up: ${f.allowance} (${f.network}), with this agent as ${f.agent}.`, SAKU_ON ? 'Payments go through it now.' : 'Restart the MCP client to start paying through it.', `Owner page: https://saku.glianalabs.com/?contract=${f.allowance}&network=${f.network}`].join('\n'));
+    }
+    if (f && name && name !== f.name) {
+      // Not confirmed yet: keep the key, change the name it's for.
+      if (!validSakuName(name)) return fail('name: a-z, 0-9 and single dashes, 2 to 24 long, not starting with agent-.');
+      f = { ...f, ...newSakuAccounts(name, f.network) };
+      writeSaku(process.env, f, false);
+    }
+    if (!f) {
+      const n = name ?? `bot-${Math.random().toString(36).slice(2, 7)}`;
+      if (!validSakuName(n)) return fail('name: a-z, 0-9 and single dashes, 2 to 24 long, not starting with agent-.');
+      const open = await nearView(net, SAKU_FACTORY[net], 'get_config').then(() => true, () => false);
+      if (!open) return fail(`Saku setup isn't open on ${net} yet${net === 'mainnet' ? ' (mainnet waits for an audit); use network "testnet"' : ''}.`);
+      if (await nearView<boolean>(net, SAKU_FACTORY[net], 'is_taken', { name: n }).catch(() => false)) return fail(`The name "${n}" is taken. Pick another.`);
+      f = newSaku(n, net);
+      try {
+        writeSaku(process.env, f, true);
+      } catch (e) {
+        return fail(`Could not write ${sakuPath(process.env)}: ${String((e as Error).message).slice(0, 120)}`);
+      }
+    }
+    const st = await sakuState(f);
+    if (st.state === 'ready') {
+      writeSaku(process.env, { ...f, confirmed: new Date().toISOString() }, false);
+      return ok(
+        [
+          `Done: the user's allowance ${f.allowance} (${f.network}) is live, with this agent as ${f.agent}.`,
+          `Fund it: send USDC on Base to ${st.from} (only the contract can sign for that address).`,
+          'Restart the MCP client to start paying through it. Each payment takes ~15-20 s; one over the limits or to a new seller waits for the owner.',
+          `Owner page: https://saku.glianalabs.com/?contract=${f.allowance}&network=${f.network}`,
+        ].join('\n'),
+      );
+    }
+    if (st.state === 'taken') return fail(`${f.allowance} already exists for another agent. Call saku_setup again with a different name.`);
+    return ok(
+      [
+        `Ask the user to open this link, connect their NEAR ${f.network} wallet, set the budget and sellers, and confirm one transaction (about 3 NEAR: 2.5 is the contract's storage, the rest the agent's gas):`,
+        setupLink(f),
+        `Then call saku_setup again. This agent's key is in ${sakuPath(process.env)} (owner-only); only its public half is in the link.`,
+        'Tell the user the trade-off: payments through it take ~15-20 s each, and ones over the limits wait for their approval. Paying from a wallet key or a prepaid gk_ key stays faster.',
+      ].join('\n'),
     );
   },
 );
